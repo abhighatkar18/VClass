@@ -1,0 +1,44 @@
+
+# Android Studio
+*.iml
+.gradle/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+
+# Local SDK Configuration
+local.properties
+
+# Build Files
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Signing Keys
+*.jks
+*.keystore
+*.p12
+
+# Private Environment Files
+.env
+.env.local
+*.secret
+
+# Gemini API Key
+/app/src/main/java/com/example/vclass/Constants.kt
+
+# Service Account Credentials
+*service-account*.json
+
+# Logs
+*.log
+
+/.idea/

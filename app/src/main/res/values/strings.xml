@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Vclass</string>
+    <string name="title_activity_login_page">loginPage</string>
+    <string name="title_activity_sign_in">signIn</string>
+    <string name="title_activity_dashboard">Dashboard</string>
+    <string name="title_activity_login">LoginActivity</string>
+</resources>
