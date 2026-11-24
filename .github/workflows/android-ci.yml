@@ -32,10 +32,13 @@ jobs:
         with:
           validate-wrappers: true
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - name: Prepare Android SDK and synthetic Firebase client configuration
-        run: |
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
-          cp tests/fixtures/ci-google-services.json app/google-services.json
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          accept-android-sdk-licenses: 'true'
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - name: Prepare synthetic Firebase client configuration
+        run: cp tests/fixtures/ci-google-services.json app/google-services.json
       - name: Build, lint and test
         run: bash ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest --no-daemon --continue --console=plain
       - name: Collect verification reports
