@@ -16,24 +16,24 @@ import java.util.concurrent.TimeUnit
 
 internal fun eventReminderKey(uid: String, eventId: String): String = "calendar/$uid/$eventId"
 
+internal fun eventReminderDelayMillis(eventMillis: Long, nowMillis: Long): Long? =
+    (eventMillis - nowMillis).takeIf { it > 0 }
+
 internal fun canPostReminders(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
 internal fun scheduleNotification(context: Context, uid: String, eventId: String, eventDate: Date) {
-    val delay = eventDate.time - System.currentTimeMillis()
+    val delay = eventReminderDelayMillis(eventDate.time, System.currentTimeMillis()) ?: return
+    val workRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
+        .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+        .setInputData(
+            workDataOf("uid" to uid, "eventId" to eventId)
+        )
+        .build()
 
-    if (delay > 0) {
-        val workRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .setInputData(
-                workDataOf("uid" to uid, "eventId" to eventId)
-            )
-            .build()
-
-        WorkManager.getInstance(context)
-            .enqueueUniqueWork(eventReminderKey(uid, eventId), ExistingWorkPolicy.KEEP, workRequest)
-    }
+    WorkManager.getInstance(context)
+        .enqueueUniqueWork(eventReminderKey(uid, eventId), ExistingWorkPolicy.KEEP, workRequest)
 }
 
 internal fun cancelNotification(context: Context, uid: String, eventId: String) {

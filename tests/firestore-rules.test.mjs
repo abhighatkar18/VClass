@@ -6,6 +6,10 @@ import {
   serverTimestamp, setDoc, updateDoc, writeBatch
 } from "firebase/firestore";
 
+if (process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8088") {
+  throw new Error("Run these tests with npm run test:firestore using the loopback emulator.");
+}
+
 const projectId = "demo-vclass-phase2";
 const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
 const env = await initializeTestEnvironment({ projectId, firestore: { rules } });
@@ -170,4 +174,35 @@ test("events are private and posting class content requires a manager", async ()
   await assertSucceeds(setDoc(doc(teacher, ...resourcePath), resource));
   await assertSucceeds(setDoc(doc(teacher, ...resourcePath), resource));
   await assertFails(getDoc(doc(dbFor("outsider"), ...resourcePath)));
+});
+
+test("only the assignment author can list submissions, even when another manager created the class", async () => {
+  const teacher = dbFor("teacher");
+  const creator = dbFor("creator");
+  const student = dbFor("student");
+  const outsider = dbFor("outsider");
+  const id = "teacher-assignment";
+
+  await assertSucceeds(setDoc(doc(teacher, ...assignment(id)), { ...work, createdBy: "teacher" }));
+  await assertFails(getDoc(doc(outsider, ...assignment(id))));
+  await assertFails(setDoc(doc(teacher, ...submission(id, "author-copy")), submissionData("teacher", "self")));
+  await assertSucceeds(setDoc(doc(student, ...submission(id, "draft-a")), submissionData("student", "accepted")));
+  await assertFails(getDoc(doc(outsider, ...submission(id, "draft-a"))));
+  await assertFails(getDocs(collection(creator, ...assignment(id), "submissions")));
+  const visibleToAuthor = await assertSucceeds(getDocs(collection(teacher, ...assignment(id), "submissions")));
+  if (visibleToAuthor.size !== 1 || visibleToAuthor.docs[0].id !== "draft-a") {
+    throw new Error("The author did not receive the expected submission");
+  }
+});
+
+test("event titles and dates must be valid, and signed-out clients cannot write events", async () => {
+  const eventPath = ["users", "student", "events", "review"];
+  const student = dbFor("student");
+  const guest = env.unauthenticatedContext().firestore();
+  const body = { title: "Lab review", date: new Date("2027-01-08T09:00:00Z") };
+  await assertFails(setDoc(doc(guest, ...eventPath), body));
+  await assertFails(setDoc(doc(student, ...eventPath), { ...body, title: "" }));
+  await assertFails(setDoc(doc(student, ...eventPath), { ...body, date: "2027-01-08" }));
+  await assertSucceeds(setDoc(doc(student, ...eventPath), body));
+  await assertFails(getDoc(doc(guest, ...eventPath)));
 });

@@ -9,12 +9,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -24,14 +23,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.vclass.core.ui.AppTopBar
+import com.example.vclass.core.ui.ContentState
+import com.example.vclass.core.ui.EmptyContent
+import com.example.vclass.core.ui.rememberDateFormatter
 import com.example.vclass.core.ui.valueOrNull
 import com.example.vclass.di.AppContainer
 import com.example.vclass.domain.ClassroomAssignment
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ClassDetailScreen(
     classCode: String,
@@ -46,6 +47,7 @@ internal fun ClassDetailScreen(
     onPostAnnouncement: () -> Unit
 ) {
     val context = LocalContext.current
+    val dateFormat = rememberDateFormatter("dd MMM yyyy")
     val currentUserId = AppContainer.auth.currentUserId
     val repository = AppContainer.classrooms
     val owner = remember(classCode, currentUserId) {
@@ -70,20 +72,18 @@ internal fun ClassDetailScreen(
     val onAddAssignment = { showAddAssignmentDialog = true }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text(text = className, color = Color.White) },
+        AppTopBar(
+            title = className,
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to classes")
                 }
             },
             actions = {
                 IconButton(onClick = onShowOptions) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = Color.White)
+                    Icon(Icons.Default.MoreVert, contentDescription = "Class options")
                 }
-            },
-            modifier = Modifier.statusBarsPadding(),
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
+            }
         )
 
         LazyColumn(modifier = Modifier.weight(1f).padding(8.dp)) {
@@ -93,9 +93,15 @@ internal fun ClassDetailScreen(
                 TextButton(onClick = model::reload) { Text("Retry") }
             }
             item { Text("Announcements", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp)) }
+            if (state.announcements is ContentState.Ready && state.announcements.valueOrNull().orEmpty().isEmpty()) {
+                item { EmptyContent("No announcements yet.") }
+            }
             items(state.announcements.valueOrNull().orEmpty(), key = { "announcement:${it.id}" }) { announcement -> AnnouncementCard(announcement = announcement) }
 
             item { Text("Resources", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp)) }
+            if (state.resources is ContentState.Ready && state.resources.valueOrNull().orEmpty().isEmpty()) {
+                item { EmptyContent("No resources yet.") }
+            }
             items(state.resources.valueOrNull().orEmpty(), key = { "resource:${it.id}" }) { res ->
                 val name = res.name
                 val uploadedBy = res.uploadedBy
@@ -107,22 +113,25 @@ internal fun ClassDetailScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Name: $name")
-                        Text("Uploaded At: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(uploadedAt))}")
+                        Text("Uploaded At: ${dateFormat.format(Date(uploadedAt))}")
                         Text("Uploaded By: $uploadedBy")
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(onClick = {
                             openClassFile(context, cloudinaryLink)
-                        }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                            Text("View File", color = Color.White)
+                        }) {
+                            Text("View File")
                         }
                     }
                 }
             }
 
             item { Text("Assignments", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp)) }
+            if (state.assignments is ContentState.Ready && state.assignments.valueOrNull().orEmpty().isEmpty()) {
+                item { EmptyContent("No assignments yet.") }
+            }
             items(state.assignments.valueOrNull().orEmpty(), key = { "assignment:${it.id}" }) { assignment ->
                 val dateFormatted = assignment.dueDate?.let {
-                    SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(it))
+                    dateFormat.format(Date(it))
                 } ?: "No Due Date"
 
                 val isAssignmentCreator = currentUserId != null && assignment.createdBy == currentUserId
@@ -141,14 +150,14 @@ internal fun ClassDetailScreen(
                         if (isAssignmentCreator) {
                             Button(onClick = {
                                 showSubmissionList = true
-                            }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                                Text("View Submissions", color = Color.White)
+                            }) {
+                                Text("View Submissions")
                             }
                         } else if (currentUserId != null) {
                             Button(onClick = {
                                 assignmentToSubmit = assignment
-                            }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                                Text("Submit Assignment", color = Color.White)
+                            }) {
+                                Text("Submit Assignment")
                             }
                         }
                     }

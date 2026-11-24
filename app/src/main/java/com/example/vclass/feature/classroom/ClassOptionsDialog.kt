@@ -3,10 +3,11 @@
 package com.example.vclass.feature.classroom
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.vclass.di.AppContainer
 import com.example.vclass.domain.ClassRole
@@ -46,49 +47,49 @@ fun ClassOptionsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Class Options: $className") },
         text = {
-            Column {
-                Button(enabled = role != null, onClick = onViewDetails, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Button(enabled = role != null, onClick = onViewDetails) {
                     Text("View Class Details")
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
                 when (role) {
                     ClassRole.CREATOR, ClassRole.TEACHER -> {
-                        Button(onClick = onPostAnnouncement, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                        Button(onClick = onPostAnnouncement) {
                             Text("Post Announcement")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Button(onClick = onUploadResource, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                        Button(onClick = onUploadResource) {
                             Text("Upload Resources")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Button(onClick = onAddAssignment, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                        Button(onClick = onAddAssignment) {
                             Text("Add Assignment")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Button(onClick = onManageMembers, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                        Button(onClick = onManageMembers) {
 
                             Text("Manage Members")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
                         if (role == ClassRole.CREATOR) {
-                            Button(onClick = onArchiveClass, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                            Button(onClick = onArchiveClass) {
                                 Text("Archive Class")
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     ClassRole.STUDENT -> {
-                        Button(onClick = onManageMembers, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                        Button(onClick = onManageMembers) {
                             Text("View Members")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Button(onClick = onLeaveClass, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                        Button(onClick = onLeaveClass, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) {
                             Text("Leave Class")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -98,13 +99,9 @@ fun ClassOptionsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+            Button(onClick = onDismiss) {
                 Text("Close")
             }
         }
     )
 }
-
-
-
-

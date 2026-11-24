@@ -1,10 +1,20 @@
 package com.example.vclass.feature.profile
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import com.example.vclass.core.ui.AppSpacing
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,13 +34,13 @@ fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: 
         onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(text = "Edit Profile") },
         text = {
-            Column {
-                TextField(value = name, onValueChange = { name = it }, label = { Text("Full Name") })
-                TextField(value = userClass, onValueChange = { userClass = it }, label = { Text("Class") })
-                TextField(value = rollNo, onValueChange = { rollNo = it }, label = { Text("Roll Number") })
-                TextField(value = address, onValueChange = { address = it }, label = { Text("Address") })
-                TextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") })
-                errorMessage?.let { Text(it) }
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = name, onValueChange = { name = it }, label = { Text("Full Name") })
+                OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = userClass, onValueChange = { userClass = it }, label = { Text("Class") })
+                OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = rollNo, onValueChange = { rollNo = it }, label = { Text("Roll Number") })
+                OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = address, onValueChange = { address = it }, label = { Text("Address") })
+                OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = phone, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), onValueChange = { phone = it }, label = { Text("Phone Number") })
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
@@ -39,7 +49,7 @@ fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: 
             }
         },
         dismissButton = {
-            Button(enabled = !saving, onClick = onDismiss) {
+            TextButton(enabled = !saving, onClick = onDismiss) {
                 Text("Cancel")
             }
         }

@@ -13,11 +13,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.vclass.core.ui.AppTopBar
+import com.example.vclass.core.ui.EmptyContent
 import com.example.vclass.core.ui.ContentState
 import com.example.vclass.core.ui.valueOrNull
 import com.example.vclass.di.AppContainer
@@ -65,6 +66,7 @@ internal fun ClassroomScreen() {
         )
     }  else {
         Scaffold(
+            topBar = { AppTopBar("Your Classes") },
             floatingActionButton = {
                 FloatingActionButton(
                     onClick = { showDialog = true },
@@ -79,7 +81,6 @@ internal fun ClassroomScreen() {
             }
         ) { contentPadding ->
             Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
-                Text(text = "Your Classes", fontSize = 24.sp, modifier = Modifier.padding(16.dp))
 
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
@@ -91,10 +92,10 @@ internal fun ClassroomScreen() {
                 }
 
                 if (classes.isEmpty() && !isLoading && errorMessage == null) {
-                    Text(text = "You don't have any classes yet.", modifier = Modifier.padding(16.dp))
+                    EmptyContent("You don't have any classes yet.")
                 }
 
-                LazyColumn {
+                LazyColumn(contentPadding = PaddingValues(bottom = 80.dp)) {
                     items(classes, key = { it.code }) { classroom ->
                         val (code, name) = classroom
                         Card(
@@ -107,8 +108,8 @@ internal fun ClassroomScreen() {
                             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text(text = name, fontSize = 18.sp)
-                                Text(text = "Code: $code", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(text = name, style = MaterialTheme.typography.titleMedium)
+                                Text(text = "Code: $code", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }

@@ -57,7 +57,13 @@ fun UploadResourceDialog(classCode: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = { if (!uploading) onDismiss() },
         title = { Text("Upload Resource") },
-        text = { Text(errorMessage ?: if (uploading) "Sharing file..." else "Pick a file to share with this class.") },
+        text = {
+            if (errorMessage != null) {
+                Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+            } else {
+                Text(if (uploading) "Sharing file…" else "Pick a file to share with this class.")
+            }
+        },
         confirmButton = {
             Button(enabled = !uploading, onClick = {
                 if (pending == null) launcher.launch(arrayOf("*/*")) else save()
@@ -66,7 +72,7 @@ fun UploadResourceDialog(classCode: String, onDismiss: () -> Unit) {
             }
         },
         dismissButton = {
-            Button(enabled = !uploading, onClick = onDismiss) {
+            TextButton(enabled = !uploading, onClick = onDismiss) {
                 Text("Cancel")
             }
         }

@@ -13,6 +13,9 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Source
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.Date
@@ -23,13 +26,8 @@ internal class ClassroomRepository(private val db: FirebaseFirestore, private va
 
     suspend fun list(uid: String): List<Classroom> {
         val codes = (profile(uid).get().await().get("classes") as? List<*>).orEmpty().filterIsInstance<String>()
-        return codes.mapNotNull { code ->
-            val doc = try {
-                classroom(code).get().await()
-            } catch (e: FirebaseFirestoreException) {
-                if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) return@mapNotNull null
-                throw e
-            }
+        return loadClassroomIndex(codes) { code ->
+            val doc = classroom(code).get().await()
             if (doc.exists() && doc.getTimestamp("archivedAt") == null && doc.includesMember(uid)) {
                 Classroom(code, doc.getString("name") ?: "Unknown Class")
             } else null
@@ -180,3 +178,19 @@ internal class ClassroomRepository(private val db: FirebaseFirestore, private va
         ).await()
     }
 }
+
+// Keep the private index order and limit outstanding reads for accounts with large class lists.
+internal suspend fun loadClassroomIndex(codes: List<String>, load: suspend (String) -> Classroom?): List<Classroom> =
+    coroutineScope {
+        codes.distinct().chunked(4).flatMap { batch ->
+            batch.map { code ->
+                async {
+                    try {
+                        load(code)
+                    } catch (e: FirebaseFirestoreException) {
+                        if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) null else throw e
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+    }

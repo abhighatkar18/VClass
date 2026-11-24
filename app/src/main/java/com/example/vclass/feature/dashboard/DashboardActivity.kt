@@ -1,10 +1,11 @@
 package com.example.vclass.feature.dashboard
 import android.app.NotificationManager
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
@@ -14,10 +15,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import com.example.vclass.core.ui.theme.VclassTheme
 import com.example.vclass.di.AppContainer
 import com.example.vclass.feature.calendar.CalendarScreen
@@ -41,7 +41,7 @@ class DashboardActivity : ComponentActivity() {
             onSessionChanged(null)
             return
         }
-        enableEdgeToEdge()
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
         setContent {
             VclassTheme {
                 DashboardScreen()
@@ -60,14 +60,36 @@ class DashboardActivity : ComponentActivity() {
         super.onStop()
     }
 }
-private enum class DashboardTab { HOME, CALENDAR, CHATBOT, PROFILE }
+private enum class DashboardTab(val label: String, val icon: ImageVector) {
+    HOME("Home", Icons.Filled.Home),
+    CALENDAR("Calendar", Icons.Filled.Event),
+    CHATBOT("Chatbot", Icons.Filled.SmartToy),
+    PROFILE("Profile", Icons.Filled.Person)
+}
 
 @Composable
 private fun DashboardScreen() {
     var selectedTab by rememberSaveable { mutableStateOf(DashboardTab.HOME) }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f)) {
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+        bottomBar = {
+            if (!keyboardVisible) {
+                NavigationBar {
+                    DashboardTab.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = tab == selectedTab,
+                            onClick = { selectedTab = tab },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.label) }
+                        )
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when (selectedTab) {
                 DashboardTab.HOME -> ClassroomScreen()
                 DashboardTab.CALENDAR -> CalendarScreen()
@@ -75,27 +97,5 @@ private fun DashboardScreen() {
                 DashboardTab.PROFILE -> ProfileScreen()
             }
         }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp).height(72.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BottomNavItem(icon = Icons.Filled.Home, label = "Home") { selectedTab = DashboardTab.HOME }
-            BottomNavItem(icon = Icons.Filled.Event, label = "Calendar") { selectedTab = DashboardTab.CALENDAR }
-            BottomNavItem(icon = Icons.Filled.SmartToy, label = "Chatbot") { selectedTab = DashboardTab.CHATBOT }
-            BottomNavItem(icon = Icons.Filled.Person, label = "Profile") { selectedTab = DashboardTab.PROFILE }
-        }
-    }
-}
-
-@Composable
-private fun BottomNavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Icon(imageVector = icon, contentDescription = label, modifier = Modifier.size(24.dp))
-        Text(text = label, fontSize = 12.sp)
     }
 }

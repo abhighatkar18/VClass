@@ -1,93 +1,133 @@
 package com.example.vclass.feature.calendar
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.vclass.core.ui.AppSpacing
+import com.example.vclass.core.ui.rememberDateFormatter
 import com.example.vclass.domain.Event
-import java.text.SimpleDateFormat
-import java.util.*
+import java.text.DateFormatSymbols
+import java.util.Calendar
+import java.util.Date
 
 @Composable
-internal fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange: (Calendar) -> Unit, onDateSelected: (Date) -> Unit) {
-    val dateFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-    val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val startOfMonth = calendar.clone() as Calendar
-    startOfMonth.set(Calendar.DAY_OF_MONTH, 1)
-    val dayOfWeekStart = startOfMonth.get(Calendar.DAY_OF_WEEK) - 1
-
-    val eventsByDay = remember(events, calendar.timeZone) {
-        events.groupBy { calendarDay(it.date, zone = calendar.timeZone) }
+internal fun CalendarView(
+    events: List<Event>,
+    calendar: Calendar,
+    selectedDate: Date,
+    onMonthChange: (Calendar) -> Unit,
+    onDateSelected: (Date) -> Unit
+) {
+    val monthFormat = rememberDateFormatter("MMMM yyyy", calendar.timeZone)
+    val dayFormat = rememberDateFormatter("EEEE, d MMMM yyyy", calendar.timeZone)
+    val zone = calendar.timeZone
+    val locale = LocalConfiguration.current.locales[0]
+    val weekdays = remember(locale) { DateFormatSymbols(locale).shortWeekdays.drop(1) }
+    val cells = remember(calendar, dayFormat) {
+        val day = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+        val offset = day.get(Calendar.DAY_OF_WEEK) - 1
+        val days = day.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val weeks = (offset + days + 6) / 7
+        List(weeks * 7) { position ->
+            val number = position - offset + 1
+            if (number in 1..days) {
+                day.set(Calendar.DAY_OF_MONTH, number)
+                val date = calendarDay(day.time, zone = zone)
+                CalendarCell(number, date, dayFormat.format(date))
+            } else null
+        }.chunked(7)
     }
-    var selectedEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
+    val eventsByDay = remember(events, zone) { events.groupBy { calendarDay(it.date, zone = zone) } }
+    val selected = remember(selectedDate, zone) { calendarDay(selectedDate, zone = zone) }
+    var eventDialogDay by remember { mutableStateOf<Date?>(null) }
+    val selectedEvents = eventsByDay[eventDialogDay].orEmpty()
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {
-                val newCalendar = calendar.clone() as Calendar
-                newCalendar.add(Calendar.MONTH, -1)
-                onMonthChange(newCalendar)
-            }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Previous Month")
+            IconButton(onClick = { onMonthChange((calendar.clone() as Calendar).apply { add(Calendar.MONTH, -1) }) }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous month")
             }
-            Text(text = dateFormat.format(calendar.time), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            IconButton(onClick = {
-                val newCalendar = calendar.clone() as Calendar
-                newCalendar.add(Calendar.MONTH, 1)
-                onMonthChange(newCalendar)
-            }) {
-                Icon(Icons.Filled.ArrowForward, contentDescription = "Next Month")
+            Text(
+                monthFormat.format(calendar.time),
+                Modifier.weight(1f).semantics { heading() },
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+            IconButton(onClick = { onMonthChange((calendar.clone() as Calendar).apply { add(Calendar.MONTH, 1) }) }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next month")
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Days of the week
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { day ->
-                Text(text = day, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
+        Row(Modifier.fillMaxWidth()) {
+            weekdays.forEach { weekday ->
+                Text(
+                    weekday,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Column {
-            repeat(6) { rowIndex ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    repeat(7) { columnIndex ->
-                        val day = rowIndex * 7 + columnIndex - dayOfWeekStart + 1
-                        if (day in 1..daysInMonth) {
-                            val dayDate = calendar.clone() as Calendar
-                            dayDate.set(Calendar.DAY_OF_MONTH, day)
-                            val dayEvents = eventsByDay[calendarDay(dayDate.time, zone = calendar.timeZone)].orEmpty()
-
-                            Box(
-                                modifier = Modifier
-                                    .size(45.dp)
-                                    .background(if (dayEvents.isNotEmpty()) Color.Cyan else Color.Transparent, CircleShape)
-                                    .clickable {
-                                        onDateSelected(dayDate.time)
-                                        selectedEvents = dayEvents
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(text = day.toString(), fontWeight = FontWeight.Medium, fontSize = 16.sp)
+        val colors = MaterialTheme.colorScheme
+        cells.forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { cell ->
+                    if (cell == null) {
+                        Spacer(Modifier.weight(1f).height(48.dp))
+                    } else {
+                        val dayEvents = eventsByDay[cell.date].orEmpty()
+                        val isSelected = selected == cell.date
+                        val label = when (dayEvents.size) {
+                            0 -> cell.label
+                            1 -> "${cell.label}, 1 event"
+                            else -> "${cell.label}, ${dayEvents.size} events"
+                        }
+                        Box(
+                            Modifier.weight(1f).heightIn(min = 48.dp)
+                                .selectable(selected = isSelected, role = Role.Button) {
+                                    onDateSelected(cell.date)
+                                    eventDialogDay = cell.date.takeIf { dayEvents.isNotEmpty() }
+                                }
+                                .semantics { contentDescription = label },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val color = when {
+                                isSelected -> colors.primary
+                                dayEvents.isNotEmpty() -> colors.secondaryContainer
+                                else -> colors.surface
                             }
-                        } else {
-                            Spacer(modifier = Modifier.size(45.dp))
+                            val textColor = when {
+                                isSelected -> colors.onPrimary
+                                dayEvents.isNotEmpty() -> colors.onSecondaryContainer
+                                else -> colors.onSurface
+                            }
+                            Text(
+                                cell.number.toString(),
+                                Modifier.background(color, CircleShape).padding(AppSpacing.small),
+                                color = textColor,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
                     }
                 }
@@ -97,76 +137,14 @@ internal fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange
 
     if (selectedEvents.isNotEmpty()) {
         AlertDialog(
-            onDismissRequest = { selectedEvents = emptyList() },
+            onDismissRequest = { eventDialogDay = null },
             title = { Text("Event Details") },
-            text = { Text(selectedEvents.joinToString("\n") { it.title }) },
-            confirmButton = {
-                TextButton(onClick = { selectedEvents = emptyList() }) {
-                    Text("OK")
-                }
-            }
+            text = {
+                Text(selectedEvents.joinToString("\n") { it.title }, Modifier.verticalScroll(rememberScrollState()))
+            },
+            confirmButton = { TextButton(onClick = { eventDialogDay = null }) { Text("OK") } }
         )
     }
 }
 
-
-
-//
-//
-//@Composable
-//internal fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange: (Calendar) -> Unit, onDateSelected: (Date) -> Unit) {
-//    val dateFormat = SimpleDateFormat("MMM yyyy", Locale.getDefault())
-//    val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-//    val startOfMonth = calendar.apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
-//
-//    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-//        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-//            IconButton(onClick = {
-//                val newCalendar = calendar.clone() as Calendar
-//                newCalendar.add(Calendar.MONTH, -1)
-//                onMonthChange(newCalendar)
-//            }) {
-//                Icon(Icons.Filled.ArrowBack, contentDescription = "Previous Month")
-//            }
-//            Text(text = dateFormat.format(calendar.time), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-//            IconButton(onClick = {
-//                val newCalendar = calendar.clone() as Calendar
-//                newCalendar.add(Calendar.MONTH, 1)
-//                onMonthChange(newCalendar)
-//            }) {
-//                Icon(Icons.Filled.ArrowForward, contentDescription = "Next Month")
-//            }
-//        }
-//        Spacer(modifier = Modifier.height(8.dp))
-//        Column {
-//            repeat(6) { rowIndex ->
-//                Row {
-//                    repeat(7) { columnIndex ->
-//                        val day = rowIndex * 7 + columnIndex - startOfMonth + 1
-//                        if (day > 0 && day <= daysInMonth) {
-//                            val dayDate = calendar.clone() as Calendar
-//                            dayDate.set(Calendar.DAY_OF_MONTH, day)
-//                            val eventExists = events.any { event ->
-//                                val eventCal = Calendar.getInstance().apply { time = event.date }
-//                                eventCal.get(Calendar.YEAR) == dayDate.get(Calendar.YEAR) &&
-//                                        eventCal.get(Calendar.MONTH) == dayDate.get(Calendar.MONTH) &&
-//                                        eventCal.get(Calendar.DAY_OF_MONTH) == dayDate.get(Calendar.DAY_OF_MONTH)
-//                            }
-//                            Box(
-//                                modifier = Modifier
-//                                    .size(40.dp)
-//                                    .background(if (eventExists) Color.Cyan else Color.Transparent)
-//                                    .clickable { onDateSelected(dayDate.time) },
-//                                contentAlignment = Alignment.Center
-//                            ) {
-//                                Text(text = day.toString())
-//                            }
-//                        } else {
-//                            Spacer(modifier = Modifier.size(40.dp))
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//    }
-//}
+private data class CalendarCell(val number: Int, val date: Date, val label: String)

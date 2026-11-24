@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -16,17 +18,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.vclass.core.ui.AppTopBar
 import com.example.vclass.data.firebase.ProfileDetails
 import com.example.vclass.di.AppContainer
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen() {
     val uid = AppContainer.auth.currentUserId ?: return
@@ -52,23 +55,18 @@ fun ProfileScreen() {
         }
     }
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(text = "Profile", color = Color.White) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
-            )
-        }
+        topBar = { AppTopBar("Profile") }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (state.loading) {
-                CircularProgressIndicator(color = Color.Black)
+                CircularProgressIndicator()
             } else if (profile == null || details == null) {
                 Text("Could not load your profile.", color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = model::load) { Text("Retry") }
@@ -77,46 +75,47 @@ fun ProfileScreen() {
                     modifier = Modifier
                         .size(120.dp)
                         .clip(CircleShape)
-                        .background(Color.Gray)
-                        .clickable(enabled = !saving) { pickImageLauncher.launch("image/*") }
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .clickable(enabled = !saving, onClickLabel = "Change profile picture", role = Role.Button) { pickImageLauncher.launch("image/*") }
                 ) {
                     profile.photo?.let {
                         Image(
-                            bitmap = it.asImageBitmap(),
-                            contentDescription = "Profile Picture",
+                            bitmap = remember(it) { it.asImageBitmap() },
+                            contentScale = ContentScale.Crop,
+                            contentDescription = "Profile picture",
                             modifier = Modifier.fillMaxSize()
                         )
-                    } ?: Image(
+                    } ?: Icon(
                         imageVector = Icons.Filled.AccountCircle,
-                        contentDescription = "Profile Picture",
+                        contentDescription = "Profile picture",
                         modifier = Modifier.fillMaxSize()
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(text = details.name, color = Color.Black, fontSize = 24.sp)
-                Text(text = "Class: ${details.className} | Roll No: ${details.rollNumber}", color = Color.Gray, fontSize = 14.sp)
+                Text(text = details.name, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+                Text(text = "Class: ${details.className} | Roll No: ${details.rollNumber}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Address: ${details.address}", color = Color.Black)
-                Text("Phone: ${details.phone}", color = Color.Black)
+                Text("Address: ${details.address}")
+                Text("Phone: ${details.phone}")
                 Spacer(modifier = Modifier.height(32.dp))
+                if (saving && !isEditing) Text("Saving profile picture…")
                 if (!isEditing) state.saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-                Button(enabled = !saving, onClick = { model.clearSaveError(); isEditing = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                    Text(text = "Edit Profile", color = Color.White)
+                Button(enabled = !saving, onClick = { model.clearSaveError(); isEditing = true }, modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth()) {
+                    Text(text = "Edit Profile")
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { showAboutUs = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth()
                 ) {
-                    Text(text = "About Us", color = Color.White)
+                    Text(text = "About Us")
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { AppContainer.auth.signOut() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                Text(text = "Sign Out", color = Color.White)
+            Button(onClick = { AppContainer.auth.signOut() }, modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) {
+                Text(text = "Sign Out")
             }
         }
     }

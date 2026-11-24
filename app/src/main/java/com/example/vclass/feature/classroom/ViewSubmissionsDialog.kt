@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.vclass.core.ui.EmptyContent
 import com.example.vclass.di.AppContainer
 import com.example.vclass.domain.Submission
 import kotlinx.coroutines.CancellationException
@@ -25,7 +26,10 @@ internal fun ViewSubmissionsDialog(
     var loading by remember(classCode, assignmentId) { mutableStateOf(true) }
     var loadError by remember(classCode, assignmentId) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(classCode, assignmentId) {
+    var retry by remember(classCode, assignmentId) { mutableIntStateOf(0) }
+    LaunchedEffect(classCode, assignmentId, retry) {
+        loading = true
+        loadError = null
         try {
             val result = repository.submissions(classCode, assignmentId)
             if (result == null) {
@@ -38,7 +42,7 @@ internal fun ViewSubmissionsDialog(
         } catch (_: IllegalArgumentException) {
             loadError = "This assignment reference is invalid."
         } catch (_: Exception) {
-            loadError = "Could not load submissions. Reopen the assignment to retry."
+            loadError = "Could not load submissions."
         } finally {
             loading = false
         }
@@ -56,9 +60,12 @@ internal fun ViewSubmissionsDialog(
             if (loading) {
                 CircularProgressIndicator()
             } else if (loadError != null) {
-                Text(loadError.orEmpty())
+                Column {
+                    Text(loadError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { retry++ }) { Text("Retry") }
+                }
             } else if (submissions.isEmpty()) {
-                Text("No submissions yet.")
+                EmptyContent("No submissions yet.")
             } else {
                 LazyColumn {
                     items(submissions, key = { it.id }) { submission ->
@@ -69,10 +76,9 @@ internal fun ViewSubmissionsDialog(
                             Button(
                                 onClick = {
                                     openClassFile(context, submission.fileUrl)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                }
                             ) {
-                                Text("View File", color = MaterialTheme.colorScheme.onPrimary)
+                                Text("View File")
                             }
                         }
                     }

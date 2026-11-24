@@ -2,19 +2,19 @@ package com.example.vclass.feature.classroom
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.vclass.di.AppContainer
 import com.example.vclass.feature.calendar.showDatePicker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import com.example.vclass.core.ui.rememberDateFormatter
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun AddAssignmentDialog(
@@ -22,6 +22,7 @@ fun AddAssignmentDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val dateFormat = rememberDateFormatter("dd MMM yyyy")
     val coroutineScope = rememberCoroutineScope()
     val uid = AppContainer.auth.currentUserId
     val repository = AppContainer.assignments
@@ -32,10 +33,10 @@ fun AddAssignmentDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isUploading) onDismiss() },
         title = { Text("Add Assignment") },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = {
@@ -43,25 +44,27 @@ fun AddAssignmentDialog(
                         errorMessage = null // clear previous error
                     },
                     label = { Text("Assignment Title") },
+                    singleLine = true,
+                    enabled = !isUploading,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
+                    enabled = !isUploading,
                     onClick = {
                         showDatePicker(context) { selectedDate ->
                             dueDate = selectedDate.time
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                    }
                 ) {
                     Text("Pick Due Date")
                 }
 
                 dueDate?.let {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Selected Due Date: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(it))}")
+                    Text("Selected Due Date: ${dateFormat.format(Date(it))}")
                 }
 
                 errorMessage?.let {
@@ -97,16 +100,15 @@ fun AddAssignmentDialog(
                         }
                     }
                 },
-                enabled = !isUploading,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                enabled = !isUploading
             ) {
                 Text(if (isUploading) "Adding..." else "Add Assignment")
             }
         },
         dismissButton = {
-            Button(
+            TextButton(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                enabled = !isUploading
             ) {
                 Text("Cancel")
             }

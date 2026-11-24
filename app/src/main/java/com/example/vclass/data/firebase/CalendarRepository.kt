@@ -8,26 +8,38 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Source
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 
 internal class CalendarRepository(private val db: FirebaseFirestore, private val applicationContext: Context) {
     private fun events(uid: String) = db.collection("users").document(uid).collection("events")
 
-    fun observe(uid: String) = events(uid).observeSnapshots(MetadataChanges.INCLUDE).map { snapshot ->
-        snapshot.documents.mapNotNull { doc ->
-            val date = when (val value = doc.get("date")) {
-                is Timestamp -> value.toDate()
-                is Date -> value
-                else -> return@mapNotNull null
+    fun observe(uid: String): Flow<List<Event>> = flow {
+        var reconciled = emptyMap<String, Long>()
+        events(uid).observeSnapshots(MetadataChanges.INCLUDE).collect { snapshot ->
+            val confirmed = mutableMapOf<String, Long>()
+            val entries = snapshot.documents.mapNotNull { doc ->
+                val date = when (val value = doc.get("date")) {
+                    is Timestamp -> value.toDate()
+                    is Date -> value
+                    else -> return@mapNotNull null
+                }
+                if (!doc.metadata.hasPendingWrites()) {
+                    confirmed[doc.id] = date.time
+                    if (reconciled[doc.id] != date.time) scheduleNotification(applicationContext, uid, doc.id, date)
+                } else {
+                    // Keep the last confirmed time through a metadata-only pending update.
+                    reconciled[doc.id]?.let { confirmed[doc.id] = it }
+                }
+                Event(doc.id, (doc.get("title") as? String).orEmpty(), date.time)
             }
-            if (!doc.metadata.hasPendingWrites()) {
-                scheduleNotification(applicationContext, uid, doc.id, date)
-            }
-            Event(doc.id, (doc.get("title") as? String).orEmpty(), date.time)
-        }.sortedBy { it.timeMillis }
-    }
+            reconciled = confirmed
+            emit(entries.sortedBy { it.timeMillis })
+        }
+    }.distinctUntilChanged()
 
     suspend fun save(uid: String, title: String, date: Date) {
         val name = title.trim()

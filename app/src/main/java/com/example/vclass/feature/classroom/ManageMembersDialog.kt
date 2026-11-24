@@ -85,7 +85,7 @@ fun ManageMembersDialog(
 
                 Text("Teachers", style = MaterialTheme.typography.titleMedium)
                 LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                    items(roster?.teachers.orEmpty()) { teacher ->
+                    items(roster?.teachers.orEmpty(), key = { it.id }) { teacher ->
                         MemberItem(
                             member = teacher,
                             showManagementActions = canManageMembers && !updating,
@@ -99,7 +99,7 @@ fun ManageMembersDialog(
 
                 Text("Students", style = MaterialTheme.typography.titleMedium)
                 LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                    items(roster?.students.orEmpty()) { student ->
+                    items(roster?.students.orEmpty(), key = { it.id }) { student ->
                         MemberItem(
                             member = student,
                             showManagementActions = canManageMembers && !updating,
@@ -112,7 +112,7 @@ fun ManageMembersDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "Close")
+                Icon(Icons.Default.Close, contentDescription = null)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Close")
             }
@@ -140,21 +140,21 @@ private fun MemberItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(member.displayName, style = MaterialTheme.typography.bodyLarge)
+            Text(member.displayName, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             if (showManagementActions) Row {
                 onPromote?.let {
                     IconButton(onClick = it) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Promote to Teacher")
+                        Icon(Icons.Default.PersonAdd, contentDescription = "Promote ${member.displayName} to teacher")
                     }
                 }
                 onDemote?.let {
                     IconButton(onClick = it) {
-                        Icon(Icons.Default.PersonRemove, contentDescription = "Demote to Student")
+                        Icon(Icons.Default.PersonRemove, contentDescription = "Demote ${member.displayName} to student")
                     }
                 }
                 onRemove?.let {
                     IconButton(onClick = it) {
-                        Icon(Icons.Default.Close, contentDescription = "Remove from Class")
+                        Icon(Icons.Default.Close, contentDescription = "Remove ${member.displayName} from class")
                     }
                 }
             }

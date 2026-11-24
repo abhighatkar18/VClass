@@ -2,10 +2,11 @@ package com.example.vclass.feature.classroom
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.example.vclass.di.AppContainer
@@ -31,28 +32,28 @@ fun CreateJoinClassDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text("Create or Join Class") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Row {
-                    Button(onClick = { isCreateMode = true }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                        Text("Create", color = Color.White)
+                    Button(onClick = { isCreateMode = true }, modifier = Modifier.weight(1f)) {
+                        Text("Create")
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { isCreateMode = false }, modifier = Modifier.weight(1f),colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                        Text("Join",color = Color.White)
+                    Button(onClick = { isCreateMode = false }, modifier = Modifier.weight(1f)) {
+                        Text("Join")
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
 
                 if (isCreateMode) {
-                    TextField(value = className, onValueChange = { className = it }, label = { Text("Class Name") })
+                    OutlinedTextField(singleLine = true, modifier = Modifier.fillMaxWidth(), value = className, onValueChange = { className = it }, label = { Text("Class Name") })
                 } else {
-                    TextField(value = classCode, onValueChange = { classCode = it }, label = { Text("Class Code") })
+                    OutlinedTextField(singleLine = true, modifier = Modifier.fillMaxWidth(), value = classCode, onValueChange = { classCode = it }, label = { Text("Class Code") })
                 }
                 errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            Button(enabled = !isSaving, colors = ButtonDefaults.buttonColors(containerColor = Color.Black), onClick = {
+            Button(enabled = !isSaving, onClick = {
                 if (isSaving || AppContainer.auth.currentUserId == null) return@Button
                 val creating = isCreateMode
                 val name = className.trim()
@@ -84,11 +85,11 @@ fun CreateJoinClassDialog(
                     }
                 }
             }) {
-                Text(if (isCreateMode) "Create" else "Join", color = Color.White)
+                Text(if (isSaving) "Saving…" else if (isCreateMode) "Create" else "Join")
             }
         },
         dismissButton = {
-            Button(enabled = !isSaving, onClick = onDismiss,colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+            TextButton(enabled = !isSaving, onClick = onDismiss) {
                 Text("Cancel")
             }
         }

@@ -17,7 +17,7 @@ internal object AppContainer {
     private val firestore by lazy { FirebaseFirestore.getInstance() }
     private val uploadClient by lazy { OkHttpClient() }
 
-    val auth by lazy { AuthRepository(firebaseAuth, firestore) }
+    val auth by lazy { AuthRepository(firebaseAuth) { firestore } }
     val classrooms by lazy { ClassroomRepository(firestore, firebaseAuth) }
     val assignments by lazy { AssignmentRepository(firestore, firebaseAuth) }
 

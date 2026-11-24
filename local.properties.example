@@ -1,0 +1,6 @@
+# This is a template. Android Studio usually creates local.properties with your SDK path.
+# Use forward slashes in Windows paths. The example contains no real key.
+# sdk.dir=C:/Users/YourName/AppData/Local/Android/Sdk
+
+# Optional for local live Gemini testing. Leave blank for builds and automated tests.
+GEMINI_API_KEY=

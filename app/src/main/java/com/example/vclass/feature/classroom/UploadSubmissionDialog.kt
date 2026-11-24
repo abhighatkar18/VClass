@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,6 +79,7 @@ fun UploadSubmissionDialog(
             Column {
                 if (uploading) {
                     CircularProgressIndicator()
+                    Text("Submitting file…")
                 } else {
                     Text("Select a file to upload for \"$assignmentTitle\".")
                 }
@@ -93,7 +95,7 @@ fun UploadSubmissionDialog(
         },
         dismissButton = {
             if (!uploading) {
-                Button(onClick = onDismiss) {
+                TextButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
             }

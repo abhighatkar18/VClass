@@ -1,143 +1,127 @@
 package com.example.vclass.feature.chatbot
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.vclass.core.ui.AppSpacing
+import com.example.vclass.core.ui.AppTopBar
+import com.example.vclass.core.ui.EmptyContent
 import com.example.vclass.di.AppContainer
-import androidx.compose.foundation.layout.statusBarsPadding
 
 @Composable
 internal fun ChatbotScreen() {
     val model: ChatViewModel = viewModel(factory = viewModelFactory {
         initializer { ChatViewModel(AppContainer.newChat()::generateReply) }
     })
-    val messages by model.messageList.collectAsStateWithLifecycle()
-    ChatbotContent(Modifier, messages, model::sendMessage)
+    val state by model.state.collectAsStateWithLifecycle()
+    ChatbotContent(state, model::sendMessage)
 }
 
 @Composable
-private fun ChatbotContent(modifier: Modifier, messages: List<MessageModel>, onSend: (String) -> Unit) {
-    Column(modifier.fillMaxSize()) {
-        Header()
-        MessageList(
-            modifier = Modifier
-                .weight(1f)
-                .padding(8.dp),
-            messageList = messages
-        )
-        MessageInput(
-            onMessageSend = { message ->
-                onSend(message)
-            }
-        )
+internal fun ChatbotContent(state: ChatUiState, onSend: (String) -> Boolean) {
+    Column(Modifier.fillMaxSize()) {
+        AppTopBar("Chatbot")
+        MessageList(Modifier.weight(1f), state.messages)
+        if (state.sending) {
+            Text(
+                "Waiting for reply…",
+                Modifier.padding(horizontal = AppSpacing.medium).semantics { liveRegion = LiveRegionMode.Polite },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.medium))
+        }
+        MessageInput(state.sending, onSend)
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Header() {
-    TopAppBar(
-        title = {
-            Text(
-                text = "Chatbot",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        },
-        modifier = Modifier.statusBarsPadding(),
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.Black
-        )
-    )
-}
-
-@Composable
-private fun MessageInput(onMessageSend: (String) -> Unit) {
-    var message by remember { mutableStateOf("") }
-
+private fun MessageInput(sending: Boolean, onSend: (String) -> Boolean) {
+    var message by rememberSaveable { mutableStateOf("") }
+    val submit: () -> Unit = {
+        if (!sending && onSend(message)) message = ""
+    }
     Row(
-        modifier = Modifier
-            .padding(8.dp)
-            .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)),
+        Modifier.fillMaxWidth().padding(AppSpacing.small),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
         verticalAlignment = Alignment.CenterVertically
     ) {
         OutlinedTextField(
-            modifier = Modifier
-                .weight(1f)
-                .padding(8.dp),
+            modifier = Modifier.weight(1f),
             value = message,
             onValueChange = { message = it },
-            placeholder = { Text("Type a message...", color = Color.Black) },
-            singleLine = true
+            label = { Text("Message") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { submit() })
         )
-        IconButton(
-            onClick = {
-                if (message.isNotBlank()) {
-                    onMessageSend(message)
-                    message = ""
-                }
-            },
-            modifier = Modifier
-                .padding(8.dp)
-                .background(Color.Black, shape = androidx.compose.foundation.shape.CircleShape)
-        ) {
-            Icon(imageVector = Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+        FilledIconButton(onClick = submit, enabled = !sending && message.isNotBlank()) {
+            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send message")
         }
     }
 }
 
 @Composable
-private fun MessageList(modifier: Modifier, messageList: List<MessageModel>) {
+private fun MessageList(modifier: Modifier, messages: List<MessageModel>) {
+    // Follow new messages if the reader was at the end of the transcript.
+    val listState = rememberLazyListState()
+    var previousCount by rememberSaveable { mutableIntStateOf(messages.size) }
+    LaunchedEffect(messages.size) {
+        val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        if (messages.size > previousCount && lastVisibleIndex >= previousCount - 1) {
+            listState.scrollToItem(messages.lastIndex)
+        }
+        previousCount = messages.size
+    }
+    if (messages.isEmpty()) {
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            EmptyContent("Ask a study question to start the conversation.")
+        }
+        return
+    }
     LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(vertical = 8.dp)
+        modifier = modifier.fillMaxWidth(),
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.small),
+        contentPadding = PaddingValues(AppSpacing.medium)
     ) {
-        items(messageList) { messageModel ->
-            MessageRow(messageModel)
+        // Transcript entries only append, so their original indices stay stable.
+        items(messages.size, key = { it }) { index ->
+            MessageRow(messages[index])
         }
     }
 }
 
 @Composable
-private fun MessageRow(messageModel: MessageModel) {
-    val isModel = messageModel.role == "model"
-    val alignment = if (isModel) Alignment.Start else Alignment.End
-    val cleanMessage = messageModel.message.replace("*", "")
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = if (isModel) Arrangement.Start else Arrangement.End
-    ) {
-        Box(
-            modifier = Modifier
-                .background(if (isModel) Color.White else Color.Black, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-                .padding(12.dp)
+private fun MessageRow(message: MessageModel) {
+    val isModel = message.role == "model"
+    val colors = MaterialTheme.colorScheme
+    val cleanMessage = remember(message.message) { message.message.replace("*", "") }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isModel) Arrangement.Start else Arrangement.End) {
+        Surface(
+            modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(0.9f),
+            shape = MaterialTheme.shapes.medium,
+            color = if (isModel) colors.surfaceVariant else colors.primary,
+            contentColor = if (isModel) colors.onSurfaceVariant else colors.onPrimary
         ) {
-            Text(
-                text = cleanMessage,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Normal,
-                color = if (isModel) Color.Black else Color.White
-            )
+            Text(cleanMessage, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

@@ -2,6 +2,7 @@
 # Android Studio
 *.iml
 .gradle/
+.kotlin/
 .idea/caches/
 .idea/libraries/
 .idea/modules.xml
@@ -11,6 +12,7 @@
 
 # Local SDK Configuration
 local.properties
+/app/src/*/google-services.json
 
 # Build Files
 **/build/
@@ -26,17 +28,26 @@ Thumbs.db
 *.jks
 *.keystore
 *.p12
+keystore.properties
+signing.properties
 
 # Private Environment Files
 .env
-.env.local
+.env.*
+!.env.example
 *.secret
+secrets.properties
 
 # Gemini API Key
 /app/src/main/java/com/example/vclass/Constants.kt
 
 # Service Account Credentials
 *service-account*.json
+
+# Local test tooling
+node_modules/
+.firebase/
+emulator-data/
 
 # Logs
 *.log

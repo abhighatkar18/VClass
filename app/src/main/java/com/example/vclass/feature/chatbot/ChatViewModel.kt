@@ -1,4 +1,3 @@
-
 package com.example.vclass.feature.chatbot
 
 import android.util.Log
@@ -10,20 +9,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+internal data class ChatUiState(val messages: List<MessageModel> = emptyList(), val sending: Boolean = false)
+
 internal class ChatViewModel(private val generateReply: suspend (String) -> String) : ViewModel() {
 
-    private val messages = MutableStateFlow(emptyList<MessageModel>())
-    val messageList = messages.asStateFlow()
+    private val mutableState = MutableStateFlow(ChatUiState())
+    val state = mutableState.asStateFlow()
 
     private val conversationHistory = StringBuilder()
-    private var isSending = false
 
-    fun sendMessage(question: String) {
+    fun sendMessage(question: String): Boolean {
         val text = question.trim()
-        if (text.isEmpty() || isSending) return
-
-        isSending = true
-        messages.update { it + MessageModel(text, "user") }
+        if (text.isEmpty() || mutableState.value.sending) return false
+        mutableState.update { it.copy(messages = it.messages + MessageModel(text, "user"), sending = true) }
 
         viewModelScope.launch {
             try {
@@ -33,7 +31,7 @@ internal class ChatViewModel(private val generateReply: suspend (String) -> Stri
                 conversationHistory.append("Student: $text\n")
                 conversationHistory.append("Tutor: $reply\n")
 
-                messages.update { it + MessageModel(reply, "model") }
+                mutableState.update { it.copy(messages = it.messages + MessageModel(reply, "model")) }
 
             } catch (e: CancellationException) {
                 throw e
@@ -58,12 +56,13 @@ internal class ChatViewModel(private val generateReply: suspend (String) -> Stri
                         "Unable to get a response. Please try again."
                 }
 
-                messages.update { it + MessageModel(errorMessage, "model") }
+                mutableState.update { it.copy(messages = it.messages + MessageModel(errorMessage, "model")) }
 
             } finally {
-                isSending = false
+                mutableState.update { it.copy(sending = false) }
             }
         }
+        return true
     }
 
     private fun preprocessForEducationalContext(

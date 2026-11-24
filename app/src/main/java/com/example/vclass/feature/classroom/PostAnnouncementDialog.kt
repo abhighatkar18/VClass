@@ -2,11 +2,12 @@ package com.example.vclass.feature.classroom
 
 import com.example.vclass.feature.calendar.showDatePicker
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.vclass.feature.calendar.calendarDay
@@ -15,7 +16,7 @@ import com.example.vclass.di.AppContainer
 import com.example.vclass.domain.ClassAnnouncement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import com.example.vclass.core.ui.rememberDateFormatter
 import java.util.*
 
 @Composable
@@ -32,13 +33,11 @@ fun PostAnnouncementDialog(
     var saving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("Post Announcement") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -87,14 +86,13 @@ fun PostAnnouncementDialog(
                             saving = false
                         }
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                }
             ) {
-                Text("Post")
+                Text(if (saving) "Posting…" else "Post")
             }
         },
         dismissButton = {
-            Button(enabled = !saving, onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+            TextButton(enabled = !saving, onClick = onDismiss) {
                 Text("Cancel")
             }
         }
@@ -114,10 +112,11 @@ internal fun AnnouncementCard(announcement: ClassAnnouncement) {
     val scope = rememberCoroutineScope()
     val requestPermission = rememberReminderPermissionRequest()
 
-    val timestamp = announcement.postedAt?.let(::Date)
-    val formattedDate = timestamp?.let {
-        SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(it)
-    } ?: "Unknown date"
+    val dateFormat = rememberDateFormatter("dd MMM yyyy, hh:mm a")
+    val eventDateFormat = rememberDateFormatter("dd MMM yyyy")
+    val formattedDate = remember(announcement.postedAt, dateFormat) {
+        announcement.postedAt?.let { dateFormat.format(Date(it)) } ?: "Unknown date"
+    }
 
     Card(
         modifier = Modifier
@@ -140,13 +139,12 @@ internal fun AnnouncementCard(announcement: ClassAnnouncement) {
             Text(
                 text = "Posted on: $formattedDate",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { showDialog = true },
-                modifier = Modifier.align(Alignment.Start),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                modifier = Modifier.align(Alignment.Start)
             ) {
                 Text("Save as Event")
             }
@@ -158,7 +156,7 @@ internal fun AnnouncementCard(announcement: ClassAnnouncement) {
             onDismissRequest = { if (!saving) showDialog = false },
             title = { Text("Save Announcement as Event") },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     OutlinedTextField(
                         value = eventTitle,
                         onValueChange = { eventTitle = it },
@@ -168,7 +166,7 @@ internal fun AnnouncementCard(announcement: ClassAnnouncement) {
                     Button(onClick = {
                         showDatePicker(context, selectedDate) { selectedDate = calendarDay(it, hour = 9) }
                     }) {
-                        Text("Select Date: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(selectedDate)}")
+                        Text("Select Date: ${eventDateFormat.format(selectedDate)}")
                     }
                     Text("Future events are scheduled for 9:00 AM.", style = MaterialTheme.typography.bodySmall)
                     errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -198,12 +196,12 @@ internal fun AnnouncementCard(announcement: ClassAnnouncement) {
                             saving = false
                         }
                     }
-                }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                    Text("Save")
+                }) {
+                    Text(if (saving) "Saving…" else "Save")
                 }
             },
             dismissButton = {
-                Button(enabled = !saving, onClick = { showDialog = false; errorMessage = null }) {
+                TextButton(enabled = !saving, onClick = { showDialog = false; errorMessage = null }) {
                     Text("Cancel")
                 }
             }

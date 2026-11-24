@@ -1,0 +1,16 @@
+{
+  "name": "vclass-tests",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test:firestore": "firebase emulators:exec --only firestore --config firebase.phase2.json --project demo-vclass-phase2 \"node --test tests/firestore-rules.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.4.0",
+    "firebase-tools": "15.37.0"
+  }
+}
