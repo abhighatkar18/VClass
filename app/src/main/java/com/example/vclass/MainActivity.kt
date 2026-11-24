@@ -1,26 +1,14 @@
 package com.example.vclass
 
-import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.auth.FirebaseAuth
+import com.example.vclass.navigation.AppNavigation
 
 class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
-    private val runnable = Runnable {
-        val auth = FirebaseAuth.getInstance()
-        val currentUser = auth.currentUser
-        if (currentUser != null) {
-            // User is already logged in, go to Dashboard
-            startActivity(Intent(this@MainActivity, Dashboard::class.java))
-        } else {
-            // User is not logged in, go to SignIn
-            startActivity(Intent(this@MainActivity, signIn::class.java))
-        }
-        finish()
-    }
+    private val runnable = Runnable { AppNavigation.openStart(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
