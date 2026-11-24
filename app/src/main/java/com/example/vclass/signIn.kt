@@ -2,6 +2,7 @@ package com.example.vclass
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,9 +27,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class signIn : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,23 +187,36 @@ class SignupViewModel : ViewModel() {
     private val firestore = FirebaseFirestore.getInstance()
 
     fun registerUser(name: String, email: String, password: String, callback: (Boolean, String) -> Unit) {
-        if (name.isBlank() || email.isBlank() || password.isBlank()) {
-            callback(false, "Please fill in all fields")
+        val displayName = name.trim()
+        val emailAddress = email.trim()
+        if (displayName.length !in 1..120 || !Patterns.EMAIL_ADDRESS.matcher(emailAddress).matches() || password.length < 6) {
+            callback(false, "Enter a name, valid email, and password of at least six characters.")
             return
         }
 
-        auth.createUserWithEmailAndPassword(email, password).addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val userId = auth.currentUser?.uid ?: ""
-                val userMap = hashMapOf(
-                    "name" to name,
-                    "email" to email
-                )
-                firestore.collection("users").document(userId).set(userMap)
-                    .addOnSuccessListener { callback(true, "Signup Successful!") }
-                    .addOnFailureListener { callback(false, "Error saving user data") }
-            } else {
-                callback(false, task.exception?.message ?: "Signup failed")
+        viewModelScope.launch {
+            val user = try {
+                checkNotNull(auth.createUserWithEmailAndPassword(emailAddress, password).await().user)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                callback(false, "Could not create the account. Check your details or try signing in.")
+                return@launch
+            }
+            try {
+                user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(displayName).build()).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Firestore can still save the name if updating the Auth display name fails.
+            }
+            try {
+                ensureUserProfile(firestore, user, displayName)
+                callback(true, "Signup successful!")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                callback(true, "Account created. Open Profile to retry setup.")
             }
         }
     }

@@ -22,12 +22,15 @@ import androidx.compose.ui.unit.dp
 import com.example.vclass.calendarscreen.showDatePicker
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private data class PendingSubmission(val id: String, val data: Map<String, Any>)
 
 @Composable
 fun UploadSubmissionDialog(
@@ -41,44 +44,68 @@ fun UploadSubmissionDialog(
     val db = FirebaseFirestore.getInstance()
     val scope = rememberCoroutineScope()
 
-    var uploading by remember { mutableStateOf(false) }
+    var uploading by remember(classCode, assignmentId) { mutableStateOf(false) }
+    var pending by remember(classCode, assignmentId) { mutableStateOf<PendingSubmission?>(null) }
+    var errorMessage by remember(classCode, assignmentId) { mutableStateOf<String?>(null) }
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null && user != null) {
-            uploading = true
-            scope.launch {
-                try {
-                    val cloudUrl = uploadFileToCloudinary(context, uri)
-                    if (cloudUrl != null) {
-                        val submission = mapOf(
+    fun submit(uri: android.net.Uri? = null) {
+        if (uploading || user == null || (uri == null && pending == null)) return
+        uploading = true
+        errorMessage = null
+        scope.launch {
+            try {
+                val assignment = db.assignmentDocument(classCode, assignmentId)
+                if (!assignment.get(Source.SERVER).await().exists()) {
+                    errorMessage = "This assignment is no longer available."
+                    return@launch
+                }
+                val submissions = assignment.collection("submissions")
+                val draft = pending ?: run {
+                    val cloudUrl = uploadFileToCloudinary(context, requireNotNull(uri))
+                    if (cloudUrl == null) {
+                        errorMessage = "Could not upload the file. Please try again."
+                        return@launch
+                    }
+                    PendingSubmission(
+                        id = submissions.document().id,
+                        data = mapOf(
                             "fileUrl" to cloudUrl,
                             "submittedAt" to System.currentTimeMillis(),
                             "studentId" to user.uid,
-                            "studentName" to (user.displayName ?: "Unknown")
+                            "studentName" to (user.displayName ?: "Class member")
                         )
-                        db.collection("classes").document(classCode)
-                            .collection("assignments").document(assignmentId)
-                            .collection("submissions").add(submission).await()
-
-                        Toast.makeText(context, "Assignment submitted!", Toast.LENGTH_SHORT).show()
-                        onDismiss()
-                    } else {
-                        Toast.makeText(context, "Upload failed!", Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    Toast.makeText(context, "Could not save the submission. Please try again.", Toast.LENGTH_LONG).show()
-                } finally {
-                    uploading = false
+                    ).also { pending = it }
                 }
-
+                val submission = submissions.document(draft.id)
+                db.runTransaction { transaction ->
+                    check(transaction.get(assignment).exists())
+                    val previous = transaction.get(submission)
+                    if (previous.exists()) {
+                        check(previous.data == draft.data)
+                    } else {
+                        transaction.set(submission, draft.data)
+                    }
+                }.await()
+                Toast.makeText(context, "Assignment submitted!", Toast.LENGTH_SHORT).show()
+                onDismiss()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: IllegalArgumentException) {
+                errorMessage = "This assignment reference is invalid."
+            } catch (_: Exception) {
+                errorMessage = "Could not save the submission. Please try again."
+            } finally {
+                uploading = false
             }
         }
     }
 
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) submit(uri)
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!uploading) onDismiss() },
         title = { Text("Upload Assignment Submission") },
         text = {
             Column {
@@ -87,12 +114,13 @@ fun UploadSubmissionDialog(
                 } else {
                     Text("Select a file to upload for \"$assignmentTitle\".")
                 }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
             if (!uploading) {
-                Button(onClick = { launcher.launch("*/*") }) {
-                    Text("Choose File")
+                Button(onClick = { if (pending == null) launcher.launch("*/*") else submit() }) {
+                    Text(if (pending == null) "Choose File" else "Retry Save")
                 }
             }
         },
@@ -163,9 +191,9 @@ fun AddAssignmentDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (isUploading) return@Button
-                    if (title.isBlank()) {
-                        errorMessage = "Title cannot be empty"
+                    if (isUploading || user == null) return@Button
+                    if (title.trim().length !in 1..120) {
+                        errorMessage = "Enter a title between 1 and 120 characters."
                         return@Button
                     }
 
@@ -174,7 +202,7 @@ fun AddAssignmentDialog(
                     val assignmentData = hashMapOf(
                         "title" to title.trim(),
                         "dueDate" to dueDate,
-                        "createdBy" to user?.uid,
+                        "createdBy" to user.uid,
                         "createdAt" to System.currentTimeMillis()
                     )
                     coroutineScope.launch {

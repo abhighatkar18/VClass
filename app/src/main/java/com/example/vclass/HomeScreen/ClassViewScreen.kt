@@ -1,7 +1,10 @@
 package com.example.vclass.HomeScreen
 
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,6 +19,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -51,25 +56,51 @@ fun ClassViewScreen(
     var showUploadDialog by remember { mutableStateOf(false) }
     var showAddAssignmentDialog by remember { mutableStateOf(false) }
     var assignmentToSubmit by remember(classCode) { mutableStateOf<ClassroomAssignment?>(null) }
+    var announcementError by remember(classCode) { mutableStateOf(false) }
+    var resourceError by remember(classCode) { mutableStateOf(false) }
+    var assignmentError by remember(classCode) { mutableStateOf(false) }
+    var loadedFeedCount by remember(classCode) { mutableStateOf(emptySet<String>()) }
+    var retryFeeds by remember(classCode) { mutableIntStateOf(0) }
+    val classRef = db.collection("classes").document(classCode)
 
-    // Firebase Listeners
-    LaunchedEffect(classCode) {
-        db.collection("classes").document(classCode).collection("announcements")
-            .addSnapshotListener { snapshot, _ ->
+    LaunchedEffect(classCode, currentUserId) {
+        if (currentUserId != null) {
+            try {
+                val profile = db.collection("users").document(currentUserId).get().await()
+                classRef.publishRosterName(currentUserId, profile)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // A missing roster entry has a generic label and can be retried on class entry.
+            }
+        }
+    }
+
+    DisposableEffect(classCode, retryFeeds) {
+        val registration = classRef.collection("announcements")
+            .addSnapshotListener { snapshot, error ->
+                announcementError = error != null
+                loadedFeedCount = loadedFeedCount + "announcements"
                 announcements = snapshot?.documents?.mapNotNull { it.data } ?: emptyList()
             }
+        onDispose { registration.remove() }
     }
 
-    LaunchedEffect(classCode) {
-        db.collection("classes").document(classCode).collection("resources")
-            .addSnapshotListener { snapshot, _ ->
+    DisposableEffect(classCode, retryFeeds) {
+        val registration = classRef.collection("resources")
+            .addSnapshotListener { snapshot, error ->
+                resourceError = error != null
+                loadedFeedCount = loadedFeedCount + "resources"
                 resources = snapshot?.documents?.mapNotNull { it.data } ?: emptyList()
             }
+        onDispose { registration.remove() }
     }
 
-    LaunchedEffect(classCode) {
-        db.collection("classes").document(classCode).collection("assignments")
-            .addSnapshotListener { snapshot, _ ->
+    DisposableEffect(classCode, retryFeeds) {
+        val registration = classRef.collection("assignments")
+            .addSnapshotListener { snapshot, error ->
+                assignmentError = error != null
+                loadedFeedCount = loadedFeedCount + "assignments"
                 assignments = snapshot?.documents.orEmpty().map { document ->
                     val data = document.data
                     ClassroomAssignment(
@@ -80,6 +111,7 @@ fun ClassViewScreen(
                     )
                 }
             }
+        onDispose { registration.remove() }
     }
 
     // Define the action handlers here
@@ -104,6 +136,17 @@ fun ClassViewScreen(
         )
 
         LazyColumn(modifier = Modifier.weight(1f).padding(8.dp)) {
+            if (loadedFeedCount.size < 3) item { CircularProgressIndicator() }
+            if (announcementError || resourceError || assignmentError) item {
+                Text("Some classroom content could not be loaded.", color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = {
+                    loadedFeedCount = emptySet()
+                    announcementError = false
+                    resourceError = false
+                    assignmentError = false
+                    retryFeeds++
+                }) { Text("Retry") }
+            }
             item { Text("Announcements", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp)) }
             items(announcements) { announcement -> AnnouncementCard(announcement = announcement) }
 
@@ -124,8 +167,7 @@ fun ClassViewScreen(
                         Text("Uploaded By: $uploadedBy")
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(cloudinaryLink))
-                            context.startActivity(intent)
+                            openClassFile(context, cloudinaryLink)
                         }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                             Text("View File", color = Color.White)
                         }
@@ -158,7 +200,7 @@ fun ClassViewScreen(
                             }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                                 Text("View Submissions", color = Color.White)
                             }
-                        } else {
+                        } else if (currentUserId != null) {
                             Button(onClick = {
                                 assignmentToSubmit = assignment
                             }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
@@ -215,8 +257,8 @@ fun ClassViewScreen(
                                 onDismissOptions()
                                 onBack()
                             },
-                            onError = { error ->
-                                println("Failed to leave class: $error")
+                            onError = {
+                                Toast.makeText(context, "Could not leave the class.", Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
@@ -248,43 +290,42 @@ fun ViewSubmissionsDialog(
 ) {
     val context = LocalContext.current
     val db = FirebaseFirestore.getInstance()
-    var submissions by remember { mutableStateOf<List<SubmissionDisplay>>(emptyList()) }
+    var submissions by remember(classCode, assignmentId) { mutableStateOf<List<SubmissionDisplay>>(emptyList()) }
+    var loading by remember(classCode, assignmentId) { mutableStateOf(true) }
+    var loadError by remember(classCode, assignmentId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(classCode, assignmentId) {
-        db.collection("classes")
-            .document(classCode)
-            .collection("assignments")
-            .document(assignmentId)
-            .collection("submissions")
-            .get()
-            .addOnSuccessListener { snapshot ->
-                val docs = snapshot.documents
-                val tempList = mutableListOf<SubmissionDisplay>()
-
-                docs.forEach { doc ->
-                    val studentId = doc.getString("studentId")
-                    val fileUrl = doc.getString("fileUrl") ?: ""
-                    val fileName = fileUrl.substringAfterLast("/") // Use file name from URL if not stored
-
-                    if (studentId != null) {
-                        db.collection("users")
-                            .document(studentId)
-                            .get()
-                            .addOnSuccessListener { userDoc ->
-                                val fullName = userDoc.getString("fullName") ?: "Unknown"
-                                tempList.add(SubmissionDisplay(fullName, fileName, fileUrl))
-                                submissions = tempList.toList()
-                            }
-                            .addOnFailureListener {
-                                tempList.add(SubmissionDisplay("Unknown", fileName, fileUrl))
-                                submissions = tempList.toList()
-                            }
-                    } else {
-                        tempList.add(SubmissionDisplay("Unknown", fileName, fileUrl))
-                        submissions = tempList.toList()
-                    }
-                }
+        try {
+            val assignment = db.assignmentDocument(classCode, assignmentId)
+            if (!assignment.get().await().exists()) {
+                loadError = "This assignment is no longer available."
+                return@LaunchedEffect
             }
+            val docs = assignment.collection("submissions").get().await().documents
+            val names = try {
+                db.collection("classes").document(classCode).rosterNames()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyMap()
+            }
+            submissions = docs.map { doc ->
+                val fileUrl = doc.getString("fileUrl").orEmpty()
+                SubmissionDisplay(
+                    doc.getString("studentId")?.let(names::get) ?: doc.getString("studentName") ?: "Class member",
+                    doc.getString("fileName") ?: Uri.parse(fileUrl).lastPathSegment.orEmpty(),
+                    fileUrl
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: IllegalArgumentException) {
+            loadError = "This assignment reference is invalid."
+        } catch (_: Exception) {
+            loadError = "Could not load submissions. Reopen the assignment to retry."
+        } finally {
+            loading = false
+        }
     }
 
     AlertDialog(
@@ -296,7 +337,11 @@ fun ViewSubmissionsDialog(
         },
         title = { Text("Submissions for \"$assignmentTitle\"") },
         text = {
-            if (submissions.isEmpty()) {
+            if (loading) {
+                CircularProgressIndicator()
+            } else if (loadError != null) {
+                Text(loadError.orEmpty())
+            } else if (submissions.isEmpty()) {
                 Text("No submissions yet.")
             } else {
                 LazyColumn {
@@ -307,8 +352,7 @@ fun ViewSubmissionsDialog(
                             Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(submission.fileUrl))
-                                    context.startActivity(intent)
+                                    openClassFile(context, submission.fileUrl)
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
@@ -321,6 +365,20 @@ fun ViewSubmissionsDialog(
         }
     )
 }
+
+private fun openClassFile(context: Context, link: String) {
+    val uri = Uri.parse(link)
+    if (uri.scheme != "https" || uri.host.isNullOrBlank()) {
+        Toast.makeText(context, "This file link is unavailable.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No app can open this file link.", Toast.LENGTH_SHORT).show()
+    }
+}
+
 fun leaveClass(classCode: String, userId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
     val db = FirebaseFirestore.getInstance()
     val userRef = db.collection("users").document(userId)
@@ -329,6 +387,7 @@ fun leaveClass(classCode: String, userId: String, onSuccess: () -> Unit, onError
     db.runBatch { batch ->
         batch.update(userRef, "classes", com.google.firebase.firestore.FieldValue.arrayRemove(classCode))
         batch.update(classRef, "members", com.google.firebase.firestore.FieldValue.arrayRemove(userId))
+        batch.delete(classRef.collection("roster").document(userId))
     }.addOnSuccessListener {
         onSuccess()
     }.addOnFailureListener { e ->

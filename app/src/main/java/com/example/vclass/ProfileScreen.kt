@@ -1,10 +1,9 @@
 package com.example.vclass
 
-import android.content.Intent
+import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -30,15 +29,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.vclass.profilescreen.AboutUsDialog
 import com.example.vclass.profilescreen.ProfileEditDialog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen() {
-    val user = FirebaseAuth.getInstance().currentUser
+    val user = FirebaseAuth.getInstance().currentUser ?: return
     val context = LocalContext.current
     val db = FirebaseFirestore.getInstance()
-    val userId = user?.uid ?: ""
+    val userId = user.uid
+    val profileRef = db.collection("users").document(userId)
+    val scope = rememberCoroutineScope()
 
     var profileBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var userName by remember { mutableStateOf("") }
@@ -49,33 +55,74 @@ fun ProfileScreen() {
     var isEditing by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     var showAboutUs by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var reload by remember { mutableIntStateOf(0) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { selectedUri ->
-            val bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, selectedUri)
-            val base64Image = bitmapToBase64(bitmap)
-            saveProfilePictureToFirestore(userId, base64Image)
-            profileBitmap = bitmap
+        if (uri != null && !saving) {
+            saving = true
+            saveError = null
+            scope.launch {
+                try {
+                    val (bitmap, encoded) = withContext(Dispatchers.IO) {
+                        val image = readProfileImage(context.contentResolver, uri)
+                        val bytes = ByteArrayOutputStream()
+                        check(image.compress(Bitmap.CompressFormat.JPEG, 85, bytes))
+                        val encoded = Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)
+                        require(encoded.length <= 850_000)
+                        image to encoded
+                    }
+                    profileRef.update("profileImage", encoded).await()
+                    profileBitmap = bitmap
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    saveError = "Could not save the photo. Try a different image or retry online."
+                } finally {
+                    saving = false
+                }
+            }
         }
     }
 
-    LaunchedEffect(userId) {
-        if (userId.isNotEmpty()) {
-            db.collection("users").document(userId).get().addOnSuccessListener { doc ->
-                if (doc.exists()) {
-                    userName = doc.getString("fullName") ?: ""
-                    userClass = doc.getString("class") ?: ""
-                    rollNo = doc.getString("rollNo") ?: ""
-                    address = doc.getString("address") ?: ""
-                    phoneNumber = doc.getString("phoneNumber") ?: ""
-
-                    val base64Image = doc.getString("profileImage")
-                    if (!base64Image.isNullOrEmpty()) {
-                        profileBitmap = base64ToBitmap(base64Image)
+    LaunchedEffect(userId, reload) {
+        isLoading = true
+        loadError = null
+        try {
+            var doc = profileRef.get().await()
+            if (!doc.exists()) {
+                ensureUserProfile(db, user)
+                doc = profileRef.get().await()
+            }
+            userName = doc.displayName().orEmpty()
+            userClass = doc.getString("class").orEmpty()
+            rollNo = doc.getString("rollNo").orEmpty()
+            address = doc.getString("address").orEmpty()
+            phoneNumber = doc.getString("phoneNumber").orEmpty()
+            val encoded = doc.getString("profileImage")
+            profileBitmap = withContext(Dispatchers.IO) {
+                encoded?.let {
+                    try {
+                        val bytes = Base64.decode(it, Base64.DEFAULT)
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                        if (options.outWidth <= 0 || options.outHeight <= 0) return@let null
+                        options.inSampleSize = profileImageSampleSize(options.outWidth, options.outHeight)
+                        options.inJustDecodeBounds = false
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    } catch (_: IllegalArgumentException) {
+                        null
                     }
-                    isLoading = false
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            loadError = "Could not load your profile."
+        } finally {
+            isLoading = false
         }
     }
 
@@ -97,13 +144,16 @@ fun ProfileScreen() {
         ) {
             if (isLoading) {
                 CircularProgressIndicator(color = Color.Black)
+            } else if (loadError != null) {
+                Text(loadError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { reload++ }) { Text("Retry") }
             } else {
                 Box(
                     modifier = Modifier
                         .size(120.dp)
                         .clip(CircleShape)
                         .background(Color.Gray)
-                        .clickable { pickImageLauncher.launch("image/*") }
+                        .clickable(enabled = !saving) { pickImageLauncher.launch("image/*") }
                 ) {
                     profileBitmap?.let {
                         Image(
@@ -125,8 +175,9 @@ fun ProfileScreen() {
                 Text("Address: $address", color = Color.Black)
                 Text("Phone: $phoneNumber", color = Color.Black)
                 Spacer(modifier = Modifier.height(32.dp))
+                if (!isEditing) saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-                Button(onClick = { isEditing = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                Button(enabled = !saving, onClick = { saveError = null; isEditing = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                     Text(text = "Edit Profile", color = Color.White)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -137,13 +188,10 @@ fun ProfileScreen() {
                 ) {
                     Text(text = "About Us", color = Color.White)
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = {
-                    FirebaseAuth.getInstance().signOut()
-                    context.startActivity(Intent(context, signIn::class.java))
-                }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                    Text(text = "Sign Out", color = Color.White)
-                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { FirebaseAuth.getInstance().signOut() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                Text(text = "Sign Out", color = Color.White)
             }
         }
     }
@@ -155,17 +203,38 @@ fun ProfileScreen() {
             currentRollNo = rollNo,
             currentAddress = address,
             currentPhone = phoneNumber,
-            onDismiss = { isEditing = false },
+            saving = saving,
+            errorMessage = saveError,
+            onDismiss = { isEditing = false; saveError = null },
             onSave = { name, uClass, rNo, addr, phone ->
-                db.collection("users").document(userId).update(
-                    mapOf("fullName" to name, "class" to uClass, "rollNo" to rNo, "address" to addr, "phoneNumber" to phone)
-                )
-                userName = name
-                userClass = uClass
-                rollNo = rNo
-                address = addr
-                phoneNumber = phone
-                isEditing = false
+                if (!saving) {
+                    val fullName = name.trim()
+                    if (fullName.length !in 1..120) {
+                        saveError = "Enter a name between 1 and 120 characters."
+                    } else {
+                        saving = true
+                        saveError = null
+                        scope.launch {
+                            try {
+                                profileRef.update(
+                                    mapOf("fullName" to fullName, "class" to uClass, "rollNo" to rNo, "address" to addr, "phoneNumber" to phone)
+                                ).await()
+                                userName = fullName
+                                userClass = uClass
+                                rollNo = rNo
+                                address = addr
+                                phoneNumber = phone
+                                isEditing = false
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                saveError = "Could not save your profile. Please try again."
+                            } finally {
+                                saving = false
+                            }
+                        }
+                    }
+                }
             }
         )
     }
@@ -175,29 +244,22 @@ fun ProfileScreen() {
     }
 }
 
-/** Convert Bitmap to Base64 String */
-fun bitmapToBase64(bitmap: Bitmap): String {
-    val outputStream = ByteArrayOutputStream()
-    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
-    val byteArray = outputStream.toByteArray()
-    return Base64.encodeToString(byteArray, Base64.DEFAULT)
+private fun readProfileImage(resolver: ContentResolver, uri: Uri): Bitmap {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    require(options.outWidth > 0 && options.outHeight > 0)
+    options.inJustDecodeBounds = false
+    options.inSampleSize = profileImageSampleSize(options.outWidth, options.outHeight)
+    return requireNotNull(resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) })
 }
 
-/** Convert Base64 String to Bitmap */
-fun base64ToBitmap(base64String: String): Bitmap {
-    val decodedBytes = Base64.decode(base64String, Base64.DEFAULT)
-    return BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-}
-
-/** Save Profile Picture as Base64 in Firestore */
-fun saveProfilePictureToFirestore(userId: String, base64Image: String) {
-    if (userId.isNotEmpty()) {
-        val db = FirebaseFirestore.getInstance()
-        val userRef = db.collection("users").document(userId)
-        userRef.update("profileImage", base64Image)
-            .addOnSuccessListener { println("✅ Profile picture saved successfully!") }
-            .addOnFailureListener { e -> println("❌ Error saving profile picture: ${e.message}") }
+private fun profileImageSampleSize(width: Int, height: Int): Int {
+    val longestEdge = maxOf(width, height)
+    var sampleSize = 1
+    while (longestEdge / sampleSize > 1024) {
+        sampleSize *= 2
     }
+    return sampleSize
 }
 
 @Preview

@@ -11,6 +11,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.example.vclass.calendarscreen.calendarDay
+import com.example.vclass.calendarscreen.saveCalendarEvent
+import com.example.vclass.rememberReminderPermissionRequest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -27,13 +33,14 @@ fun PostAnnouncementDialog(
 
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var saveAsEvent by remember { mutableStateOf(false) }
-    var selectedDate by remember { mutableStateOf(Date()) }
+    val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("Post Announcement") },
         text = {
             Column {
@@ -45,6 +52,7 @@ fun PostAnnouncementDialog(
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
                 OutlinedTextField(
                     value = description,
@@ -61,25 +69,35 @@ fun PostAnnouncementDialog(
         },
         confirmButton = {
             Button(
+                enabled = !saving,
                 onClick = {
+                    if (saving) return@Button
+                    val subject = title.trim()
+                    val body = description.trim()
+                    if (subject.length !in 1..120 || body.length !in 1..5000) {
+                        errorMessage = "Enter a title and description (up to 120 and 5,000 characters)."
+                        return@Button
+                    }
+                    saving = true
+                    errorMessage = null
                     val data = hashMapOf(
-                        "title" to title,
-                        "description" to description,
+                        "title" to subject,
+                        "description" to body,
                         "posterId" to userId,
                         "timestamp" to Date()
                     )
-                    announcementsRef.add(data).addOnSuccessListener { docRef ->
-                        if (saveAsEvent) {
-                            val event = hashMapOf(
-                                "title" to title,
-                                "date" to selectedDate
-                            )
-                            firestore.collection("users").document(userId)
-                                .collection("events")
-                                .add(event)
+                    scope.launch {
+                        try {
+                            announcementsRef.add(data).await()
+                            onDismiss()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            errorMessage = "Could not post the announcement. Please try again."
+                        } finally {
+                            saving = false
                         }
                     }
-                    onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
             ) {
@@ -87,7 +105,7 @@ fun PostAnnouncementDialog(
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+            Button(enabled = !saving, onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
                 Text("Cancel")
             }
         }
@@ -103,7 +121,11 @@ fun AnnouncementCard(announcement: Map<String, Any>) {
 
     var showDialog by remember { mutableStateOf(false) }
     var eventTitle by remember { mutableStateOf(announcement["title"].toString()) }
-    var selectedDate by remember { mutableStateOf(Date()) }
+    var selectedDate by remember { mutableStateOf(calendarDay(Date(), hour = 9)) }
+    var saving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val requestPermission = rememberReminderPermissionRequest()
 
     val timestamp = (announcement["timestamp"] as? com.google.firebase.Timestamp)?.toDate()
     val formattedDate = timestamp?.let {
@@ -146,7 +168,7 @@ fun AnnouncementCard(announcement: Map<String, Any>) {
 
     if (showDialog) {
         AlertDialog(
-            onDismissRequest = { showDialog = false },
+            onDismissRequest = { if (!saving) showDialog = false },
             title = { Text("Save Announcement as Event") },
             text = {
                 Column {
@@ -157,26 +179,44 @@ fun AnnouncementCard(announcement: Map<String, Any>) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = {
-                        showDatePicker(context) { selectedDate = it }
+                        showDatePicker(context, selectedDate) { selectedDate = calendarDay(it, hour = 9) }
                     }) {
                         Text("Select Date: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(selectedDate)}")
                     }
+                    Text("Future events are scheduled for 9:00 AM.", style = MaterialTheme.typography.bodySmall)
+                    errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    val event = hashMapOf(
-                        "title" to eventTitle,
-                        "date" to selectedDate
-                    )
-                    firestore.collection("users").document(userId).collection("events").add(event)
-                    showDialog = false
+                Button(enabled = !saving, onClick = {
+                    if (saving) return@Button
+                    val title = eventTitle.trim()
+                    val date = selectedDate
+                    if (title.length !in 1..120) {
+                        errorMessage = "Enter an event name between 1 and 120 characters."
+                        return@Button
+                    }
+                    saving = true
+                    errorMessage = null
+                    scope.launch {
+                        try {
+                            saveCalendarEvent(context, firestore, userId, title, date)
+                            if (date.after(Date())) requestPermission()
+                            showDialog = false
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            errorMessage = "Could not save the event. Please try again."
+                        } finally {
+                            saving = false
+                        }
+                    }
                 }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                     Text("Save")
                 }
             },
             dismissButton = {
-                Button(onClick = { showDialog = false }) {
+                Button(enabled = !saving, onClick = { showDialog = false; errorMessage = null }) {
                     Text("Cancel")
                 }
             }

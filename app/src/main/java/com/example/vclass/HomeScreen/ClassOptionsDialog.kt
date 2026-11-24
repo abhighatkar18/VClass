@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 
 
@@ -32,17 +33,24 @@ fun ClassOptionsDialog(
     var role by remember { mutableStateOf("loading") }
 
     // Determine the role
-    LaunchedEffect(classCode) {
-        currentUser?.uid?.let { uid ->
+    LaunchedEffect(classCode, currentUser?.uid) {
+        val uid = currentUser?.uid ?: return@LaunchedEffect
+        try {
             val classDoc = db.collection("classes").document(classCode).get().await()
             val creatorId = classDoc.getString("creatorId") ?: ""
-            val teachers = classDoc.get("teachers") as? List<String> ?: emptyList()
+            val teachers = classDoc.memberIds("teachers")
 
             role = when {
+                classDoc.getTimestamp("archivedAt") != null -> "unavailable"
                 uid == creatorId -> "creator"
                 uid in teachers -> "teacher"
-                else -> "member"
+                uid in classDoc.memberIds("members") -> "member"
+                else -> "unavailable"
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            role = "unavailable"
         }
     }
 
@@ -51,7 +59,7 @@ fun ClassOptionsDialog(
         title = { Text("Class Options: $className") },
         text = {
             Column {
-                Button(onClick = onViewDetails, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                Button(enabled = role in listOf("creator", "teacher", "member"), onClick = onViewDetails, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                     Text("View Class Details")
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -79,8 +87,10 @@ fun ClassOptionsDialog(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Button(onClick = onDeleteClass, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
-                            Text("Delete Class")
+                        if (role == "creator") {
+                            Button(onClick = onDeleteClass, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+                                Text("Archive Class")
+                            }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -95,6 +105,7 @@ fun ClassOptionsDialog(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
+                    "unavailable" -> Text("Class options are unavailable. Reopen the dialog to retry.")
                 }
             }
         },

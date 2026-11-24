@@ -1,6 +1,5 @@
 package com.example.vclass.HomeScreen
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,7 +22,7 @@ import kotlinx.coroutines.tasks.await
 
 data class Member(
     val id: String,
-    val data: Map<String, Any>
+    val displayName: String
 )
 
 internal fun canManageClassMembers(viewerId: String?, creatorId: String?, teacherIds: List<String>): Boolean =
@@ -44,38 +43,32 @@ fun ManageMembersDialog(
     var creator by remember(classCode, viewerId) { mutableStateOf<Member?>(null) }
     var teachers by remember(classCode, viewerId) { mutableStateOf<List<Member>>(emptyList()) }
     var students by remember(classCode, viewerId) { mutableStateOf<List<Member>>(emptyList()) }
-    var selectedMember by remember(classCode, viewerId) { mutableStateOf<Member?>(null) }
     var errorMessage by remember(classCode, viewerId) { mutableStateOf<String?>(null) }
+    var updating by remember(classCode, viewerId) { mutableStateOf(false) }
 
     suspend fun refreshData() {
         canManageMembers = false
-        selectedMember = null
         errorMessage = null
         try {
             val classDoc = classRef.get().await()
             val creatorId = classDoc.getString("creatorId")
-            val teacherIds = (classDoc.get("teachers") as? List<*>).orEmpty().filterIsInstance<String>()
-            val memberIds = (classDoc.get("members") as? List<*>).orEmpty().filterIsInstance<String>()
-            val isManager = !classDoc.metadata.isFromCache &&
+            val teacherIds = classDoc.memberIds("teachers")
+            val memberIds = classDoc.memberIds("members")
+            val isManager = !classDoc.metadata.isFromCache && !classDoc.metadata.hasPendingWrites() &&
                 canManageClassMembers(viewerId, creatorId, teacherIds)
-            if (viewerId == null || (viewerId != creatorId && viewerId !in teacherIds && viewerId !in memberIds)) {
+            if (viewerId == null || !classDoc.includesMember(viewerId) || classDoc.getTimestamp("archivedAt") != null) {
                 errorMessage = "This roster is available to class members only."
                 return
             }
 
-            val visibleFields = setOf("fullName", "name", "class", "rollNo")
-            val allowedFields = if (isManager) visibleFields + setOf("email", "phoneNumber", "address") else visibleFields
+            val names = classRef.rosterNames()
+            fun member(id: String) = Member(id, names[id] ?: "Class member")
 
-            suspend fun readMember(id: String): Member {
-                val profile = db.collection("users").document(id).get().await()
-                return Member(id, profile.data.orEmpty().filterKeys { it in allowedFields })
-            }
-
-            val loadedCreator = creatorId?.takeIf { it.isNotBlank() }?.let { readMember(it) }
-            val loadedTeachers = teacherIds.map { readMember(it) }
+            val loadedCreator = creatorId?.takeIf { it.isNotBlank() }?.let { member(it) }
+            val loadedTeachers = teacherIds.map { member(it) }
             val loadedStudents = memberIds
                 .filter { it !in teacherIds && it != creatorId }
-                .map { readMember(it) }
+                .map { member(it) }
 
             creator = loadedCreator
             teachers = loadedTeachers
@@ -89,16 +82,16 @@ fun ManageMembersDialog(
     }
 
     fun updateMember(update: suspend () -> Unit) {
-        if (!canManageMembers) return
+        if (!canManageMembers || updating) return
+        updating = true
         coroutineScope.launch {
             try {
                 val classDoc = classRef.get(Source.SERVER).await()
-                val teacherIds = (classDoc.get("teachers") as? List<*>).orEmpty().filterIsInstance<String>()
                 if (auth.currentUser?.uid != viewerId ||
-                    !canManageClassMembers(viewerId, classDoc.getString("creatorId"), teacherIds)
+                    classDoc.getTimestamp("archivedAt") != null || classDoc.metadata.hasPendingWrites() ||
+                    !canManageClassMembers(viewerId, classDoc.getString("creatorId"), classDoc.memberIds("teachers"))
                 ) {
                     canManageMembers = false
-                    selectedMember = null
                     errorMessage = "Your class permissions have changed."
                     return@launch
                 }
@@ -108,20 +101,14 @@ fun ManageMembersDialog(
                 throw e
             } catch (_: Exception) {
                 errorMessage = "Could not update the class member. Please try again."
+            } finally {
+                updating = false
             }
         }
     }
 
     LaunchedEffect(classCode, viewerId) {
         refreshData()
-    }
-
-    if (selectedMember != null) {
-        MemberDetailsDialog(
-            member = selectedMember!!,
-            showContactDetails = canManageMembers,
-            onDismiss = { selectedMember = null }
-        )
     }
 
     AlertDialog(
@@ -132,10 +119,7 @@ fun ManageMembersDialog(
                 errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Text("Creator", style = MaterialTheme.typography.titleMedium)
                 creator?.let {
-                    MemberItem(
-                        member = it,
-                        onDetails = { selectedMember = it }
-                    )
+                    MemberItem(member = it)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -145,17 +129,21 @@ fun ManageMembersDialog(
                     items(teachers) { teacher ->
                         MemberItem(
                             member = teacher,
-                            onDetails = { selectedMember = it },
-                            showManagementActions = canManageMembers,
+                            showManagementActions = canManageMembers && !updating,
                             onRemove = {
                                 updateMember {
-                                    classRef.update("teachers", FieldValue.arrayRemove(teacher.id)).await()
+                                    db.runBatch { batch ->
+                                        batch.update(classRef, "teachers", FieldValue.arrayRemove(teacher.id))
+                                        batch.delete(classRef.collection("roster").document(teacher.id))
+                                    }.await()
                                 }
                             },
                             onDemote = {
                                 updateMember {
-                                    classRef.update("teachers", FieldValue.arrayRemove(teacher.id)).await()
-                                    classRef.update("members", FieldValue.arrayUnion(teacher.id)).await()
+                                    classRef.update(
+                                        "teachers", FieldValue.arrayRemove(teacher.id),
+                                        "members", FieldValue.arrayUnion(teacher.id)
+                                    ).await()
                                 }
                             }
                         )
@@ -169,17 +157,21 @@ fun ManageMembersDialog(
                     items(students) { student ->
                         MemberItem(
                             member = student,
-                            onDetails = { selectedMember = it },
-                            showManagementActions = canManageMembers,
+                            showManagementActions = canManageMembers && !updating,
                             onRemove = {
                                 updateMember {
-                                    classRef.update("members", FieldValue.arrayRemove(student.id)).await()
+                                    db.runBatch { batch ->
+                                        batch.update(classRef, "members", FieldValue.arrayRemove(student.id))
+                                        batch.delete(classRef.collection("roster").document(student.id))
+                                    }.await()
                                 }
                             },
                             onPromote = {
                                 updateMember {
-                                    classRef.update("teachers", FieldValue.arrayUnion(student.id)).await()
-                                    classRef.update("members", FieldValue.arrayRemove(student.id)).await()
+                                    classRef.update(
+                                        "teachers", FieldValue.arrayUnion(student.id),
+                                        "members", FieldValue.arrayRemove(student.id)
+                                    ).await()
                                 }
                             }
                         )
@@ -196,11 +188,9 @@ fun ManageMembersDialog(
         }
     )
 }
-
 @Composable
-fun MemberItem(
+private fun MemberItem(
     member: Member,
-    onDetails: (Member) -> Unit,
     showManagementActions: Boolean = false,
     onRemove: (() -> Unit)? = null,
     onPromote: (() -> Unit)? = null,
@@ -209,8 +199,7 @@ fun MemberItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onDetails(member) },
+            .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(
@@ -220,11 +209,7 @@ fun MemberItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(member.data["fullName"] as? String ?: "N/A", style = MaterialTheme.typography.bodyLarge)
-                Text("Class: ${member.data["class"] as? String ?: "N/A"}", style = MaterialTheme.typography.bodySmall)
-                Text("Roll No: ${member.data["rollNo"] as? String ?: "N/A"}", style = MaterialTheme.typography.bodySmall)
-            }
+            Text(member.displayName, style = MaterialTheme.typography.bodyLarge)
             if (showManagementActions) Row {
                 onPromote?.let {
                     IconButton(onClick = it) {
@@ -244,31 +229,4 @@ fun MemberItem(
             }
         }
     }
-}
-
-@Composable
-fun MemberDetailsDialog(member: Member, showContactDetails: Boolean, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Member Details") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                val data = member.data
-                Text("Full Name: ${data["fullName"] ?: "N/A"}")
-                Text("Name: ${data["name"] ?: "N/A"}")
-                Text("Class: ${data["class"] ?: "N/A"}")
-                Text("Roll No: ${data["rollNo"] ?: "N/A"}")
-                if (showContactDetails) {
-                    Text("Email: ${data["email"] ?: "N/A"}")
-                    Text("Phone: ${data["phoneNumber"] ?: "N/A"}")
-                    Text("Address: ${data["address"] ?: "N/A"}")
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close")
-            }
-        }
-    )
 }

@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 
 
@@ -36,14 +37,21 @@ fun ClassDetailsDialog(classCode: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var className by remember { mutableStateOf("") }
     var members by remember { mutableStateOf<List<String>>(emptyList()) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(classCode) {
-        val classDoc = db.collection("classes").document(classCode).get().await()
-        className = classDoc.getString("name") ?: "Unknown Class"
-        val memberIds = classDoc.get("members") as? List<String> ?: emptyList()
-        members = memberIds.mapNotNull { memberId ->
-            val userDoc = db.collection("users").document(memberId).get().await()
-            userDoc.getString("name") ?: "Unknown User"
+        try {
+            val classRef = db.collection("classes").document(classCode)
+            val classDoc = classRef.get().await()
+            className = classDoc.getString("name") ?: "Unknown Class"
+            val names = classRef.rosterNames()
+            members = (listOfNotNull(classDoc.getString("creatorId")) +
+                classDoc.memberIds("teachers") + classDoc.memberIds("members"))
+                .distinct().map { names[it] ?: "Class member" }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            errorMessage = "Could not load class details."
         }
     }
 
@@ -52,6 +60,7 @@ fun ClassDetailsDialog(classCode: String, onDismiss: () -> Unit) {
         title = { Text("Class Details: $className") },
         text = {
             Column {
+                errorMessage?.let { Text(it) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Class Code: $classCode", fontSize = 16.sp)
                     Spacer(modifier = Modifier.width(8.dp))

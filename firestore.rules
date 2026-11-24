@@ -1,0 +1,192 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function classPath(code) {
+      return /databases/$(database)/documents/classes/$(code);
+    }
+
+    function active(data) {
+      return data.get('archivedAt', null) == null;
+    }
+
+    function manages(data) {
+      return signedIn() &&
+        (data.creatorId == request.auth.uid || request.auth.uid in data.get('teachers', []));
+    }
+
+    function belongs(data) {
+      return signedIn() && (manages(data) || request.auth.uid in data.get('members', []));
+    }
+
+    function activeMember(code) {
+      let classroom = get(classPath(code));
+      return classroom != null && active(classroom.data) && belongs(classroom.data);
+    }
+
+    function activeManager(code) {
+      let classroom = get(classPath(code));
+      return classroom != null && active(classroom.data) && manages(classroom.data);
+    }
+
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function textBetween(value, low, high) {
+      return value is string && value.size() >= low && value.size() <= high;
+    }
+
+    function httpsLink(value) {
+      return textBetween(value, 9, 4096) && value.matches('https://[^ /]+[^ ]*');
+    }
+
+    match /users/{uid} {
+      function validTextEdit(field, maxLength) {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([field]) ||
+          textBetween(request.resource.data.get(field, ''), 0, maxLength);
+      }
+
+      allow get: if owns(uid);
+      allow create: if owns(uid)
+        && request.resource.data.keys().hasOnly(['name', 'email'])
+        && textBetween(request.resource.data.name, 0, 120)
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if owns(uid)
+        && changedOnly(['fullName', 'class', 'rollNo', 'address', 'phoneNumber', 'profileImage', 'classes'])
+        && validTextEdit('fullName', 120)
+        && validTextEdit('class', 120)
+        && validTextEdit('rollNo', 120)
+        && validTextEdit('address', 500)
+        && validTextEdit('phoneNumber', 80)
+        && validTextEdit('profileImage', 950000)
+        && request.resource.data.get('classes', []) is list;
+
+      match /events/{eventId} {
+        allow read, delete: if owns(uid);
+        allow create: if owns(uid)
+          && request.resource.data.keys().hasOnly(['title', 'date'])
+          && textBetween(request.resource.data.title, 1, 120)
+          && request.resource.data.date is timestamp;
+      }
+    }
+
+    match /classes/{code} {
+      // An authenticated creator can check a candidate code without reading another class.
+      allow get: if signedIn() && (resource == null || belongs(resource.data));
+      allow create: if signedIn()
+        && code.matches('[0-9a-f]{6}')
+        && request.resource.data.keys().hasOnly(['name', 'members', 'creatorId'])
+        && textBetween(request.resource.data.name, 1, 120)
+        && request.resource.data.creatorId == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && ownClassIndexContains(code);
+
+      function ownClassIndexContains(code) {
+        let profile = getAfter(/databases/$(database)/documents/users/$(request.auth.uid));
+        return profile != null && code in profile.data.get('classes', []);
+      }
+
+      function selfJoinOrLeave(code) {
+        let uid = request.auth.uid;
+        let previous = resource.data.get('members', []).toSet();
+        let updated = request.resource.data.members.toSet();
+        let self = [uid].toSet();
+        return changedOnly(['members']) && !manages(resource.data)
+          && request.resource.data.members.size() == updated.size()
+          && ((updated == previous.union(self) && ownClassIndexContains(code))
+            || (uid in previous && updated == previous.difference(self) && !ownClassIndexContains(code)));
+      }
+
+      function updateRoles() {
+        let previous = resource.data.get('members', []).toSet().union(resource.data.get('teachers', []).toSet());
+        let members = request.resource.data.get('members', []);
+        let teachers = request.resource.data.get('teachers', []);
+        return changedOnly(['members', 'teachers'])
+          && members is list && teachers is list
+          && members.size() == members.toSet().size() && teachers.size() == teachers.toSet().size()
+          && members.toSet().union(teachers.toSet()).difference(previous).size() == 0;
+      }
+
+      allow update: if signedIn() && active(resource.data)
+        && (selfJoinOrLeave(code)
+          || (manages(resource.data) && updateRoles())
+          || (resource.data.creatorId == request.auth.uid && changedOnly(['archivedAt'])
+            && request.resource.data.archivedAt == request.time));
+
+      match /roster/{uid} {
+        function memberAfterWrite() {
+          let classroom = getAfter(classPath(code));
+          return classroom != null && active(classroom.data) && belongs(classroom.data);
+        }
+
+        allow read: if activeMember(code);
+        allow create, update: if owns(uid) && memberAfterWrite()
+          && request.resource.data.keys().hasOnly(['displayName'])
+          && textBetween(request.resource.data.displayName, 1, 120);
+        allow delete: if activeManager(code) || (owns(uid) && activeMember(code));
+      }
+
+      match /announcements/{id} {
+        allow read: if activeMember(code);
+        allow create: if activeManager(code)
+          && request.resource.data.keys().hasOnly(['title', 'description', 'posterId', 'timestamp'])
+          && request.resource.data.posterId == request.auth.uid
+          && textBetween(request.resource.data.title, 1, 120)
+          && textBetween(request.resource.data.description, 1, 5000)
+          && request.resource.data.timestamp is timestamp;
+      }
+
+      match /resources/{id} {
+        function validResource() {
+          let data = request.resource.data;
+          return data.keys().hasOnly(['name', 'cloudinaryLink', 'uploadedBy', 'uploadedAt'])
+            && textBetween(data.name, 1, 1024) && httpsLink(data.cloudinaryLink)
+            && textBetween(data.uploadedBy, 1, 120) && data.uploadedAt is int;
+        }
+        allow read: if activeMember(code);
+        allow create: if activeManager(code) && validResource();
+        allow update: if activeManager(code) && request.resource.data == resource.data;
+      }
+
+      match /assignments/{assignmentId} {
+        allow read: if activeMember(code);
+        allow create: if activeManager(code)
+          && request.resource.data.keys().hasOnly(['title', 'dueDate', 'createdBy', 'createdAt'])
+          && request.resource.data.createdBy == request.auth.uid
+          && textBetween(request.resource.data.title, 1, 120)
+          && (request.resource.data.dueDate == null || request.resource.data.dueDate is int)
+          && request.resource.data.createdAt is int;
+
+        match /submissions/{submissionId} {
+          function assignmentPath() {
+            return /databases/$(database)/documents/classes/$(code)/assignments/$(assignmentId);
+          }
+
+          function assignmentAuthor() {
+            let assignment = get(assignmentPath());
+            return assignment != null && assignment.data.createdBy == request.auth.uid;
+          }
+
+          allow get: if activeMember(code) && (assignmentAuthor() ||
+            (exists(assignmentPath()) && (resource == null || owns(resource.data.studentId))));
+          allow list: if activeMember(code) && assignmentAuthor();
+          allow create: if activeMember(code) && exists(assignmentPath()) && !assignmentAuthor()
+            && request.resource.data.keys().hasOnly(['fileUrl', 'submittedAt', 'studentId', 'studentName'])
+            && owns(request.resource.data.studentId)
+            && httpsLink(request.resource.data.fileUrl)
+            && request.resource.data.submittedAt is int
+            && textBetween(request.resource.data.studentName, 1, 120);
+        }
+      }
+    }
+  }
+}

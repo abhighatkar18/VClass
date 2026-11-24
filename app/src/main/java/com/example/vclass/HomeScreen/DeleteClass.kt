@@ -4,11 +4,12 @@ import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -19,37 +20,43 @@ fun DeleteClass(classCode: String, onDismiss: () -> Unit, onClassDeleted: () -> 
     val user = FirebaseAuth.getInstance().currentUser
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Delete Class") },
-        text = { Text("Are you sure you want to delete this class? This action cannot be undone.") },
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("Archive Class") },
+        text = { Text(errorMessage ?: "This removes the class from active lists and keeps its existing records.") },
         confirmButton = {
-            Button(onClick = {
+            Button(enabled = !saving, onClick = {
+                if (saving || user == null) return@Button
+                saving = true
                 scope.launch {
-                    val classDoc = db.collection("classes").document(classCode).get().await()
-                    val creatorId = classDoc.getString("creatorId")
-
-                    if (user?.uid == creatorId) {
-                        db.collection("classes").document(classCode).delete().await()
-                        val usersQuery = db.collection("users").whereArrayContains("classes", classCode).get().await()
-                        for (doc in usersQuery.documents) {
-                            db.collection("users").document(doc.id)
-                                .update("classes", doc["classes"].let { (it as List<*>).filter { id -> id != classCode } })
-                        }
-                        Toast.makeText(context, "Class deleted successfully", Toast.LENGTH_SHORT).show()
+                    try {
+                        val classRef = db.collection("classes").document(classCode)
+                        db.runTransaction { transaction ->
+                            val classroom = transaction.get(classRef)
+                            check(classroom.getString("creatorId") == user.uid)
+                            if (classroom.getTimestamp("archivedAt") == null) {
+                                transaction.update(classRef, "archivedAt", FieldValue.serverTimestamp())
+                            }
+                        }.await()
+                        Toast.makeText(context, "Class archived", Toast.LENGTH_SHORT).show()
                         onClassDeleted()
-                    } else {
-                        Toast.makeText(context, "Only the creator can delete this class", Toast.LENGTH_SHORT).show()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        errorMessage = "Could not archive this class. Only its creator can archive it."
+                    } finally {
+                        saving = false
                     }
-                    onDismiss()
                 }
             }) {
-                Text("Delete")
+                Text("Archive")
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss) {
+            Button(enabled = !saving, onClick = onDismiss) {
                 Text("Cancel")
             }
         }

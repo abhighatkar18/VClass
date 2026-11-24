@@ -7,9 +7,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.vclass.displayName
+import com.example.vclass.ensureUserProfile
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.util.Locale
 import java.util.UUID
 
 @Composable
@@ -23,9 +29,12 @@ fun CreateJoinClassDialog(
     var className by remember { mutableStateOf("") }
     var classCode by remember { mutableStateOf("") }
     var isCreateMode by remember { mutableStateOf(true) }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text("Create or Join Class") },
         text = {
             Column {
@@ -45,72 +54,65 @@ fun CreateJoinClassDialog(
                 } else {
                     TextField(value = classCode, onValueChange = { classCode = it }, label = { Text("Class Code") })
                 }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            Button(colors = ButtonDefaults.buttonColors(containerColor = Color.Black),onClick = {
-                user?.uid?.let { userId ->
-                    if (isCreateMode && className.isNotEmpty()) {
-                        val generatedCode = UUID.randomUUID().toString().substring(0, 6)
-                        val classRef = db.collection("classes").document(generatedCode)
-
-                        // Store class with only members and creator
-                        val classData = mapOf(
-                            "name" to className,
-                            "members" to listOf(userId),  // Only creator initially
-                            "creatorId" to userId
-                        )
-
-                        classRef.set(classData).addOnSuccessListener {
-                            // Add class to the user’s document
-                            db.collection("users").document(userId)
-                                .update("classes", FieldValue.arrayUnion(generatedCode))
-                                .addOnSuccessListener {
-                                    onClassCreated()
-                                    Toast.makeText(context, "Class Created! Code: $generatedCode", Toast.LENGTH_LONG).show()
-                                }
-                                .addOnFailureListener {
-                                    Toast.makeText(context, "Failed to add class to user", Toast.LENGTH_SHORT).show()
-                                }
-                        }.addOnFailureListener {
-                            Toast.makeText(context, "Failed to create class", Toast.LENGTH_SHORT).show()
+            Button(enabled = !isSaving, colors = ButtonDefaults.buttonColors(containerColor = Color.Black), onClick = {
+                if (isSaving || user == null) return@Button
+                val creating = isCreateMode
+                val name = className.trim()
+                val code = if (creating) UUID.randomUUID().toString().substring(0, 6)
+                    else classCode.trim().lowercase(Locale.ROOT)
+                if (creating && name.length !in 1..120) {
+                    errorMessage = "Enter a class name between 1 and 120 characters."
+                    return@Button
+                }
+                if (!creating && !code.matches(Regex("[0-9a-f]{6}"))) {
+                    errorMessage = "Enter a valid six-character class code."
+                    return@Button
+                }
+                isSaving = true
+                errorMessage = null
+                scope.launch {
+                    try {
+                        ensureUserProfile(db, user)
+                        val userRef = db.collection("users").document(user.uid)
+                        val classRef = db.collection("classes").document(code)
+                        val rosterName = userRef.get().await().displayName()?.take(120)
+                        val rosterRef = classRef.collection("roster").document(user.uid)
+                        if (creating) {
+                            db.runTransaction { transaction ->
+                                check(!transaction.get(classRef).exists())
+                                transaction.set(classRef, mapOf("name" to name, "members" to listOf(user.uid), "creatorId" to user.uid))
+                                transaction.update(userRef, "classes", FieldValue.arrayUnion(code))
+                                rosterName?.let { transaction.set(rosterRef, mapOf("displayName" to it)) }
+                            }.await()
+                        } else {
+                            db.runBatch { batch ->
+                                batch.update(classRef, "members", FieldValue.arrayUnion(user.uid))
+                                batch.update(userRef, "classes", FieldValue.arrayUnion(code))
+                                rosterName?.let { batch.set(rosterRef, mapOf("displayName" to it)) }
+                            }.await()
                         }
-                    } else if (!isCreateMode && classCode.isNotEmpty()) {
-                        val classRef = db.collection("classes").document(classCode)
-                        classRef.get().addOnSuccessListener { document ->
-                            if (document.exists()) {
-                                // Add user to the class
-                                classRef.update("members", FieldValue.arrayUnion(userId))
-                                    .addOnSuccessListener {
-                                        // Add class to the user’s document
-                                        db.collection("users").document(userId)
-                                            .update("classes", FieldValue.arrayUnion(classCode))
-                                            .addOnSuccessListener {
-                                                Toast.makeText(context, "Joined Class", Toast.LENGTH_SHORT).show()
-                                                onClassCreated()
-                                            }
-                                            .addOnFailureListener {
-                                                Toast.makeText(context, "Failed to add class to user", Toast.LENGTH_SHORT).show()
-                                            }
-                                    }
-                                    .addOnFailureListener {
-                                        Toast.makeText(context, "Failed to join class", Toast.LENGTH_SHORT).show()
-                                    }
-                            } else {
-                                Toast.makeText(context, "Invalid Class Code", Toast.LENGTH_SHORT).show()
-                            }
-                        }.addOnFailureListener {
-                            Toast.makeText(context, "Error getting class", Toast.LENGTH_SHORT).show()
-                        }
+                        Toast.makeText(context, if (creating) "Class Created! Code: $code" else "Joined Class", Toast.LENGTH_LONG).show()
+                        onClassCreated()
+                        onDismiss()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        errorMessage = if (creating) "Could not create the class. Please try again."
+                            else "Could not join the class. Check the code and your connection."
+                    } finally {
+                        isSaving = false
                     }
                 }
-                onDismiss()
             }) {
                 Text(if (isCreateMode) "Create" else "Join", color = Color.White)
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss,colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
+            Button(enabled = !isSaving, onClick = onDismiss,colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                 Text("Cancel")
             }
         }

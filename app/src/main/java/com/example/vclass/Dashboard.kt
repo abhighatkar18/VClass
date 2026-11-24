@@ -1,4 +1,6 @@
 package com.example.vclass
+import android.content.Intent
+import android.app.NotificationManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,15 +14,32 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.vclass.ui.theme.VclassTheme
+import com.google.firebase.auth.FirebaseAuth
 
 class Dashboard : ComponentActivity() {
+    private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
+    private val sessionListener = FirebaseAuth.AuthStateListener {
+        if (it.currentUser == null && !isFinishing) {
+            getSystemService(NotificationManager::class.java).cancelAll()
+            startActivity(Intent(this, signIn::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            finish()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (auth.currentUser == null) {
+            sessionListener.onAuthStateChanged(auth)
+            return
+        }
         enableEdgeToEdge()
         setContent {
             VclassTheme {
@@ -28,10 +47,20 @@ class Dashboard : ComponentActivity() {
             }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        if (!isFinishing) auth.addAuthStateListener(sessionListener)
+    }
+
+    override fun onStop() {
+        auth.removeAuthStateListener(sessionListener)
+        super.onStop()
+    }
 }
 @Composable
 fun MainScreen() {
-    var selectedTabIndex by remember { mutableStateOf(0) }
+    var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {

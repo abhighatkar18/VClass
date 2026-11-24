@@ -13,7 +13,7 @@ import androidx.compose.runtime.setValue
 
 
 @Composable
-fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: String, currentAddress: String, currentPhone: String, onDismiss: () -> Unit, onSave: (String, String, String, String, String) -> Unit) {
+fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: String, currentAddress: String, currentPhone: String, saving: Boolean, errorMessage: String?, onDismiss: () -> Unit, onSave: (String, String, String, String, String) -> Unit) {
     var name by remember { mutableStateOf(currentName) }
     var userClass by remember { mutableStateOf(currentClass) }
     var rollNo by remember { mutableStateOf(currentRollNo) }
@@ -21,7 +21,7 @@ fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: 
     var phone by remember { mutableStateOf(currentPhone) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(text = "Edit Profile") },
         text = {
             Column {
@@ -30,15 +30,16 @@ fun ProfileEditDialog(currentName: String, currentClass: String, currentRollNo: 
                 TextField(value = rollNo, onValueChange = { rollNo = it }, label = { Text("Roll Number") })
                 TextField(value = address, onValueChange = { address = it }, label = { Text("Address") })
                 TextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") })
+                errorMessage?.let { Text(it) }
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(name, userClass, rollNo, address, phone) }) {
-                Text("Save")
+            Button(enabled = !saving, onClick = { onSave(name, userClass, rollNo, address, phone) }) {
+                Text(if (saving) "Saving..." else "Save")
             }
         },
         dismissButton = {
-            Button(onClick = onDismiss) {
+            Button(enabled = !saving, onClick = onDismiss) {
                 Text("Cancel")
             }
         }

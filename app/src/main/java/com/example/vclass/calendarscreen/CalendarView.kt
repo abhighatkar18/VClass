@@ -28,7 +28,10 @@ fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange: (Calend
     startOfMonth.set(Calendar.DAY_OF_MONTH, 1)
     val dayOfWeekStart = startOfMonth.get(Calendar.DAY_OF_WEEK) - 1
 
-    var selectedEvent by remember { mutableStateOf<Event?>(null) }
+    val eventsByDay = remember(events, calendar.timeZone) {
+        events.groupBy { calendarDay(it.date, zone = calendar.timeZone) }
+    }
+    var selectedEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
         Row(
@@ -70,18 +73,16 @@ fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange: (Calend
                         if (day in 1..daysInMonth) {
                             val dayDate = calendar.clone() as Calendar
                             dayDate.set(Calendar.DAY_OF_MONTH, day)
-                            val event = events.find { event ->
-                                val eventCal = Calendar.getInstance().apply { time = event.date }
-                                eventCal.get(Calendar.YEAR) == dayDate.get(Calendar.YEAR) &&
-                                        eventCal.get(Calendar.MONTH) == dayDate.get(Calendar.MONTH) &&
-                                        eventCal.get(Calendar.DAY_OF_MONTH) == dayDate.get(Calendar.DAY_OF_MONTH)
-                            }
+                            val dayEvents = eventsByDay[calendarDay(dayDate.time, zone = calendar.timeZone)].orEmpty()
 
                             Box(
                                 modifier = Modifier
                                     .size(45.dp)
-                                    .background(if (event != null) Color.Cyan else Color.Transparent, CircleShape)
-                                    .clickable { selectedEvent = event },
+                                    .background(if (dayEvents.isNotEmpty()) Color.Cyan else Color.Transparent, CircleShape)
+                                    .clickable {
+                                        onDateSelected(dayDate.time)
+                                        selectedEvents = dayEvents
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(text = day.toString(), fontWeight = FontWeight.Medium, fontSize = 16.sp)
@@ -95,13 +96,13 @@ fun CalendarView(events: List<Event>, calendar: Calendar, onMonthChange: (Calend
         }
     }
 
-    selectedEvent?.let { event ->
+    if (selectedEvents.isNotEmpty()) {
         AlertDialog(
-            onDismissRequest = { selectedEvent = null },
+            onDismissRequest = { selectedEvents = emptyList() },
             title = { Text("Event Details") },
-            text = { Text("${event.title}\nDate: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(event.date)}") },
+            text = { Text(selectedEvents.joinToString("\n") { it.title }) },
             confirmButton = {
-                TextButton(onClick = { selectedEvent = null }) {
+                TextButton(onClick = { selectedEvents = emptyList() }) {
                     Text("OK")
                 }
             }

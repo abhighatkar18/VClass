@@ -2,6 +2,7 @@ package com.example.vclass
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -160,21 +161,31 @@ class LoginViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
 
     fun loginUser(email: String, password: String, callback: (Boolean, String) -> Unit) {
-        auth.signInWithEmailAndPassword(email, password).addOnCompleteListener { task ->
+        val address = email.trim()
+        if (!Patterns.EMAIL_ADDRESS.matcher(address).matches() || password.isEmpty()) {
+            callback(false, "Enter a valid email and your password.")
+            return
+        }
+        auth.signInWithEmailAndPassword(address, password).addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 callback(true, "Login Successful!")
             } else {
-                callback(false, task.exception?.message ?: "Login failed")
+                callback(false, "Could not sign in. Check your details and connection.")
             }
         }
     }
 
     fun resetPassword(email: String, callback: (Boolean, String) -> Unit) {
-        auth.sendPasswordResetEmail(email).addOnCompleteListener { task ->
+        val address = email.trim()
+        if (!Patterns.EMAIL_ADDRESS.matcher(address).matches()) {
+            callback(false, "Enter a valid email address.")
+            return
+        }
+        auth.sendPasswordResetEmail(address).addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 callback(true, "Password reset email sent!")
             } else {
-                callback(false, task.exception?.message ?: "Error sending reset email")
+                callback(false, "Could not send the reset email. Please try again.")
             }
         }
     }

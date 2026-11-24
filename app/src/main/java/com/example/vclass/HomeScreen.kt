@@ -1,6 +1,7 @@
 package com.example.vclass
 
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -20,8 +21,11 @@ import com.example.vclass.HomeScreen.CreateJoinClassDialog
 import com.example.vclass.HomeScreen.DeleteClass
 import com.example.vclass.HomeScreen.ManageMembersDialog
 import com.example.vclass.HomeScreen.PostAnnouncementDialog
+import com.example.vclass.HomeScreen.includesMember
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -52,30 +56,31 @@ fun HomeScreen() {
             user?.uid?.let { userId ->
                 try {
                     val userDoc = db.collection("users").document(userId).get().await()
-                    val classCodes = userDoc.get("classes") as? List<String> ?: emptyList()
+                    val classCodes = (userDoc.get("classes") as? List<*>).orEmpty().filterIsInstance<String>()
                     val classList = mutableListOf<Pair<String, String>>()
 
                     for (code in classCodes) {
-                        val classDoc = db.collection("classes").document(code).get().await()
-                        if (classDoc.exists()) {
+                        val classDoc = try {
+                            db.collection("classes").document(code).get().await()
+                        } catch (e: FirebaseFirestoreException) {
+                            if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) continue
+                            throw e
+                        }
+                        if (classDoc.exists() && classDoc.getTimestamp("archivedAt") == null && classDoc.includesMember(userId)) {
                             val name = classDoc.getString("name") ?: "Unknown Class"
-                            val members = classDoc.get("members") as? List<String> ?: emptyList()
-                            val creatorId = classDoc.getString("creatorId") ?: ""
-
-                            if (userId in members || userId == creatorId) {
-                                classList.add(code to name)
-                            }
+                            classList.add(code to name)
                         }
                     }
 
                     classes = classList
                     isLoading = false
-                } catch (e: Exception) {
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
                     isLoading = false
-                    errorMessage = "Error fetching user classes: ${e.message}"
-                    println(errorMessage)
+                    errorMessage = "Could not load your classes."
                 }
-            }
+            } ?: run { isLoading = false }
         }
     }
 
@@ -83,11 +88,19 @@ fun HomeScreen() {
         fetchUserClasses()
     }
 
+    fun closeClass() {
+        viewingClass = null
+        selectedClass = null
+        showClassOptions = false
+        fetchUserClasses()
+    }
+
+    BackHandler(enabled = viewingClass != null) { closeClass() }
     if (viewingClass != null) {
         ClassViewScreen(
             classCode = viewingClass!!.first,
             className = viewingClass!!.second,
-            onBack = { viewingClass = null },
+            onBack = { closeClass() },
             onShowOptions = { showClassOptions = true },
             showClassOptions = showClassOptions,
             onDismissOptions = { showClassOptions = false },
@@ -120,9 +133,10 @@ fun HomeScreen() {
 
                 errorMessage?.let {
                     Text(text = it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+                    TextButton(onClick = { fetchUserClasses() }) { Text("Retry") }
                 }
 
-                if (classes.isEmpty() && !isLoading) {
+                if (classes.isEmpty() && !isLoading && errorMessage == null) {
                     Text(text = "You don't have any classes yet.", modifier = Modifier.padding(16.dp))
                 }
 
@@ -159,19 +173,18 @@ fun HomeScreen() {
             )
         }
 
-        if (showDeleteDialog && selectedClass != null) {
-            DeleteClass(
-                classCode = selectedClass!!.first,
-                onDismiss = { showDeleteDialog = false },
-                onClassDeleted = {
-                    fetchUserClasses()
-                    showDeleteDialog = false
-                    viewingClass = null
-                }
-            )
-        }
     }
 
+    if (showDeleteDialog && selectedClass != null) {
+        DeleteClass(
+            classCode = selectedClass!!.first,
+            onDismiss = { showDeleteDialog = false },
+            onClassDeleted = {
+                showDeleteDialog = false
+                closeClass()
+            }
+        )
+    }
     if (showClassDetails && selectedClass != null) {
         ClassDetailsDialog(
             classCode = selectedClass!!.first,
