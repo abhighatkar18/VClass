@@ -19,6 +19,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
 
+private data class ClassroomAssignment(
+    val id: String,
+    val title: String,
+    val dueDate: Long?,
+    val createdBy: String?
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClassViewScreen(
@@ -40,11 +47,10 @@ fun ClassViewScreen(
 
     var announcements by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
     var resources by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
-    var assignments by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
+    var assignments by remember(classCode) { mutableStateOf<List<ClassroomAssignment>>(emptyList()) }
     var showUploadDialog by remember { mutableStateOf(false) }
-    var showUploadAssignmentDialog by remember { mutableStateOf(false) }
     var showAddAssignmentDialog by remember { mutableStateOf(false) }
-    var selectedAssignmentTitle by remember { mutableStateOf<String?>(null) }
+    var assignmentToSubmit by remember(classCode) { mutableStateOf<ClassroomAssignment?>(null) }
 
     // Firebase Listeners
     LaunchedEffect(classCode) {
@@ -64,7 +70,15 @@ fun ClassViewScreen(
     LaunchedEffect(classCode) {
         db.collection("classes").document(classCode).collection("assignments")
             .addSnapshotListener { snapshot, _ ->
-                assignments = snapshot?.documents?.mapNotNull { it.data } ?: emptyList()
+                assignments = snapshot?.documents.orEmpty().map { document ->
+                    val data = document.data
+                    ClassroomAssignment(
+                        id = document.id,
+                        title = data?.get("title") as? String ?: "Untitled",
+                        dueDate = data?.get("dueDate") as? Long,
+                        createdBy = data?.get("createdBy") as? String
+                    )
+                }
             }
     }
 
@@ -120,15 +134,12 @@ fun ClassViewScreen(
             }
 
             item { Text("Assignments", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp)) }
-            items(assignments) { assignment ->
-                val title = assignment["title"] as? String ?: "Untitled"
-                val dueDate = assignment["dueDate"] as? Long
-                val dateFormatted = dueDate?.let {
+            items(assignments, key = { it.id }) { assignment ->
+                val dateFormatted = assignment.dueDate?.let {
                     SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(it))
                 } ?: "No Due Date"
 
-                val createdBy = assignment["createdBy"] as? String
-                val isAssignmentCreator = createdBy == currentUserId
+                val isAssignmentCreator = currentUserId != null && assignment.createdBy == currentUserId
 
                 var showSubmissionList by remember { mutableStateOf(false) }
 
@@ -137,21 +148,19 @@ fun ClassViewScreen(
                     elevation = CardDefaults.cardElevation(4.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Title: $title")
+                        Text("Title: ${assignment.title}")
                         Text("Due: $dateFormatted")
                         Spacer(modifier = Modifier.height(8.dp))
 
                         if (isAssignmentCreator) {
                             Button(onClick = {
-                                selectedAssignmentTitle = title
                                 showSubmissionList = true
                             }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                                 Text("View Submissions", color = Color.White)
                             }
                         } else {
                             Button(onClick = {
-                                selectedAssignmentTitle = title
-                                showUploadAssignmentDialog = true
+                                assignmentToSubmit = assignment
                             }, colors = ButtonDefaults.buttonColors(containerColor = Color.Black)) {
                                 Text("Submit Assignment", color = Color.White)
                             }
@@ -162,21 +171,20 @@ fun ClassViewScreen(
                 if (showSubmissionList) {
                     ViewSubmissionsDialog(
                         classCode = classCode,
-                        assignmentTitle = title,
+                        assignmentId = assignment.id,
+                        assignmentTitle = assignment.title,
                         onDismiss = { showSubmissionList = false }
                     )
                 }
             }
         }
 
-        if (showUploadAssignmentDialog && selectedAssignmentTitle != null) {
+        assignmentToSubmit?.let { assignment ->
             UploadSubmissionDialog(
                 classCode = classCode,
-                assignmentTitle = selectedAssignmentTitle!!,
-                onDismiss = {
-                    showUploadAssignmentDialog = false
-                    selectedAssignmentTitle = null
-                }
+                assignmentId = assignment.id,
+                assignmentTitle = assignment.title,
+                onDismiss = { assignmentToSubmit = null }
             )
         }
 
@@ -234,6 +242,7 @@ data class SubmissionDisplay(
 @Composable
 fun ViewSubmissionsDialog(
     classCode: String,
+    assignmentId: String,
     assignmentTitle: String,
     onDismiss: () -> Unit
 ) {
@@ -241,11 +250,11 @@ fun ViewSubmissionsDialog(
     val db = FirebaseFirestore.getInstance()
     var submissions by remember { mutableStateOf<List<SubmissionDisplay>>(emptyList()) }
 
-    LaunchedEffect(assignmentTitle) {
+    LaunchedEffect(classCode, assignmentId) {
         db.collection("classes")
             .document(classCode)
             .collection("assignments")
-            .document(assignmentTitle)
+            .document(assignmentId)
             .collection("submissions")
             .get()
             .addOnSuccessListener { snapshot ->

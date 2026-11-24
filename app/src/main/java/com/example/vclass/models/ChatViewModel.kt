@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.vclass.Constants
+import com.example.vclass.BuildConfig
 import com.example.vclass.MessageModel
 import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.CancellationException
@@ -21,7 +21,7 @@ class ChatViewModel : ViewModel() {
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-3.5-flash-lite",
-        apiKey = Constants.apiKey
+        apiKey = BuildConfig.GEMINI_API_KEY
     )
 
     fun sendMessage(question: String) {

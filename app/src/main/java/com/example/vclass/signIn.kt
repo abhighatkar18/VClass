@@ -29,7 +29,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import org.mindrot.jbcrypt.BCrypt
 
 class signIn : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -187,15 +186,12 @@ class SignupViewModel : ViewModel() {
             return
         }
 
-        val hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt())
-
         auth.createUserWithEmailAndPassword(email, password).addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 val userId = auth.currentUser?.uid ?: ""
                 val userMap = hashMapOf(
                     "name" to name,
-                    "email" to email,
-                    "password" to hashedPassword // Storing hashed password
+                    "email" to email
                 )
                 firestore.collection("users").document(userId).set(userMap)
                     .addOnSuccessListener { callback(true, "Signup Successful!") }

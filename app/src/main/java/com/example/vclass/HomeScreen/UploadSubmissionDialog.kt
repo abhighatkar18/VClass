@@ -22,7 +22,9 @@ import androidx.compose.ui.unit.dp
 import com.example.vclass.calendarscreen.showDatePicker
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -30,6 +32,7 @@ import java.util.Locale
 @Composable
 fun UploadSubmissionDialog(
     classCode: String,
+    assignmentId: String,
     assignmentTitle: String,
     onDismiss: () -> Unit
 ) {
@@ -46,7 +49,6 @@ fun UploadSubmissionDialog(
             scope.launch {
                 try {
                     val cloudUrl = uploadFileToCloudinary(context, uri)
-                    uploading = false
                     if (cloudUrl != null) {
                         val submission = mapOf(
                             "fileUrl" to cloudUrl,
@@ -55,18 +57,20 @@ fun UploadSubmissionDialog(
                             "studentName" to (user.displayName ?: "Unknown")
                         )
                         db.collection("classes").document(classCode)
-                            .collection("assignments").document(assignmentTitle)
-                            .collection("submissions").add(submission)
+                            .collection("assignments").document(assignmentId)
+                            .collection("submissions").add(submission).await()
 
                         Toast.makeText(context, "Assignment submitted!", Toast.LENGTH_SHORT).show()
                         onDismiss()
                     } else {
                         Toast.makeText(context, "Upload failed!", Toast.LENGTH_SHORT).show()
                     }
-                } catch (e: Exception) {
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    Toast.makeText(context, "Could not save the submission. Please try again.", Toast.LENGTH_LONG).show()
+                } finally {
                     uploading = false
-                    e.printStackTrace() // Log full stack trace to Logcat
-                    Toast.makeText(context, "Upload failed: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
                 }
 
             }
@@ -159,39 +163,33 @@ fun AddAssignmentDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    if (isUploading) return@Button
                     if (title.isBlank()) {
                         errorMessage = "Title cannot be empty"
                         return@Button
                     }
 
+                    isUploading = true
+                    errorMessage = null
+                    val assignmentData = hashMapOf(
+                        "title" to title.trim(),
+                        "dueDate" to dueDate,
+                        "createdBy" to user?.uid,
+                        "createdAt" to System.currentTimeMillis()
+                    )
                     coroutineScope.launch {
                         try {
-                            isUploading = true
-
-                            val sanitizedTitle = title.trim().replace("\\s+".toRegex(), "_")
-
-                            val assignmentData = hashMapOf(
-                                "title" to title.trim(),
-                                "dueDate" to dueDate,
-                                "createdBy" to user?.uid,
-                                "createdAt" to System.currentTimeMillis()
-                            )
-
                             db.collection("classes")
                                 .document(classCode)
                                 .collection("assignments")
-                                .document(sanitizedTitle) // use sanitized title as ID
-                                .set(assignmentData)
-                                .addOnSuccessListener {
-                                    Toast.makeText(context, "Assignment added!", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                }
-                                .addOnFailureListener { e ->
-                                    errorMessage = "Failed to add assignment: ${e.message}"
-                                }
-
-                        } catch (e: Exception) {
-                            errorMessage = "Unexpected error: ${e.message}"
+                                .add(assignmentData)
+                                .await()
+                            Toast.makeText(context, "Assignment added!", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            errorMessage = "Could not add the assignment. Please try again."
                         } finally {
                             isUploading = false
                         }

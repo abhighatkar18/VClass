@@ -135,9 +135,6 @@ dependencies {
     // Google Sign-In
     implementation("com.google.android.gms:play-services-auth:20.7.0")
 
-    // Password hashing
-    implementation("org.mindrot:jbcrypt:0.4")
-
     implementation("androidx.compose.material:material:1.5.4")
     implementation("androidx.compose.ui:ui-tooling-preview:1.5.4")
     implementation("androidx.activity:activity-compose:1.8.2")
